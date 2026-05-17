@@ -5537,6 +5537,16 @@ public:
         rateSlider.setBounds (headerInner.removeFromRight (122).reduced (4, 0));
 
         auto buttonRow = headerInner;
+        const auto headerControlWidth = buttonRow.getWidth();
+        headerCompactLevel = headerControlWidth < 780 ? 2 : (headerControlWidth < 920 ? 1 : 0);
+        const auto compact = headerCompactLevel > 0;
+        const auto tiny = headerCompactLevel > 1;
+
+        undoButton.setButtonText (tiny ? "U" : "Undo");
+        redoButton.setButtonText (tiny ? "R" : "Redo");
+        logButton.setButtonText (tiny ? "L" : "Log");
+        updateArrangementButtonText();
+
         auto addButton = [&buttonRow] (juce::Button& button, int width)
         {
             button.setVisible (true);
@@ -5550,21 +5560,21 @@ public:
         auto addGap = [&buttonRow] (int width) { buttonRow.removeFromLeft (width); };
 
         masterGainLabel.setBounds (buttonRow.removeFromLeft (28).reduced (3, 2));
-        masterGainSlider.setBounds (buttonRow.removeFromLeft (84).reduced (3, 0));
+        masterGainSlider.setBounds (buttonRow.removeFromLeft (compact ? 76 : 96).reduced (3, 0));
         addGap (5);
-        addButton (runButton, 66);
-        addButton (stepButton, 54);
-        addButton (stopAllButton, 64);
-        addButton (panicButton, 66);
+        addButton (runButton, compact ? 64 : 72);
+        addButton (stepButton, compact ? 52 : 62);
+        addButton (stopAllButton, compact ? 62 : 66);
+        addButton (panicButton, compact ? 66 : 74);
         addGap (7);
-        addButton (loadProjectButton, 54);
-        addButton (saveProjectButton, 54);
+        addButton (loadProjectButton, compact ? 52 : 62);
+        addButton (saveProjectButton, compact ? 52 : 62);
         addGap (6);
-        addButton (undoButton, 60);
-        addButton (redoButton, 56);
+        addButton (undoButton, tiny ? 38 : (compact ? 60 : 70));
+        addButton (redoButton, tiny ? 38 : (compact ? 56 : 66));
         addGap (6);
-        addButton (logButton, 48);
-        addButton (arrangementViewButton, 76);
+        addButton (logButton, tiny ? 38 : (compact ? 48 : 54));
+        addButton (arrangementViewButton, tiny ? 54 : (compact ? 66 : 88));
 
         if (buttonRow.getWidth() >= 102)
         {
@@ -6605,6 +6615,16 @@ private:
     {
         undoButton.setEnabled (! undoSnapshots.empty());
         redoButton.setEnabled (! redoSnapshots.empty());
+    }
+
+    void updateArrangementButtonText()
+    {
+        if (headerCompactLevel > 1)
+            arrangementViewButton.setButtonText (arrangementViewMode == 2 ? "Arr+" : "Arr");
+        else if (headerCompactLevel > 0)
+            arrangementViewButton.setButtonText (arrangementViewMode == 2 ? "Arr+" : "Arr.");
+        else
+            arrangementViewButton.setButtonText (arrangementViewMode == 2 ? "Arrange+" : "Arrange");
     }
 
     void resetUndoHistory()
@@ -8541,7 +8561,7 @@ private:
         arrangementStrip.setVisible (arrangementVisible);
         graph.setVisible (arrangementViewMode != 2);
         arrangementStrip.setMachine (machine, rateSlider.getValue(), arrangementViewMode == 2, exportInProgress, exportElapsedSeconds, exportTotalSeconds);
-        arrangementViewButton.setButtonText (arrangementViewMode == 2 ? "Arrange+" : "Arrange");
+        updateArrangementButtonText();
         arrangementViewButton.setColour (juce::TextButton::buttonColourId,
                                          arrangementVisible ? rowFill().interpolatedWith (graphColour (machine.selectedState + 2), arrangementViewMode == 2 ? 0.30f : 0.20f)
                                                             : panelFill().brighter (0.04f));
@@ -8707,6 +8727,7 @@ private:
     double lastLogFlushMs = 0.0;
     bool logVisible = false;
     bool codeExpanded = false;
+    int headerCompactLevel = 0;
     int arrangementViewMode = 0;
     bool fsmRunning = false;
     bool machinePrepared = false;
