@@ -4818,7 +4818,7 @@ public:
         {
             logVisible = ! logVisible;
             logView.setVisible (logVisible);
-            resized();
+            preserveGraphNodePositionsDuringLayout();
         };
 
         loadProjectButton.onClick = [this]
@@ -5655,6 +5655,13 @@ public:
         {
             graph.setBounds (graphArea);
         }
+    }
+
+    void preserveGraphNodePositionsDuringLayout()
+    {
+        graph.beginNodePositionLock();
+        resized();
+        graph.endNodePositionLock();
     }
 
     bool keyPressed (const juce::KeyPress& key) override

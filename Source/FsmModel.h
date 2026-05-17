@@ -243,46 +243,102 @@ public:
 
     void configureRootDemo()
     {
-        setStateCount (6);
+        setStateCount (10);
         childMachines.clear();
         childMachines.resize (states.size());
 
-        setStateDemo (0, "Autobahn", { { "Robot hook", "lead" }, { "Motor arp", "arp" }, { "Electric bass", "bassline" }, { "Drum machine", "softdrums" }, { "Vocoder chords", "chords" } });
-        setStateDemo (1, "Downtown", { { "Neon lead", "lead" }, { "Answer pulse", "counter" }, { "Electric bass", "bassline" }, { "Drum machine", "softdrums" }, { "Vocoder chords", "chords" } });
-        setStateDemo (2, "Lift", { { "Lift hook", "lead" }, { "Glass line", "shimmer" }, { "Counter pulse", "counter" }, { "Electric bass", "bassline" }, { "Drum machine", "softdrums" }, { "Lift chords", "chords" } });
-        setStateDemo (3, "Chorus", { { "Main hook", "lead" }, { "Octave arp", "arp" }, { "Round bass", "bassline" }, { "Four on floor", "softdrums" }, { "Wide chords", "chords" } });
-        setStateDemo (4, "Bridge", { { "Bridge hook", "lead" }, { "Answer pulse", "counter" }, { "Electric bass", "bassline" }, { "Drum machine", "softdrums" }, { "Bridge chords", "chords" }, { "Soft air", "texture" } });
-        setStateDemo (5, "Reprise", { { "Final hook", "lead" }, { "Glass return", "shimmer" }, { "Low bass", "bassline" }, { "Final chords", "chords" } });
-        setStateTiming (0, 104.0, 4, 4);
-        setStateTiming (1, 106.0, 4, 4);
-        setStateTiming (2, 108.0, 4, 4);
-        setStateTiming (3, 110.0, 4, 4);
-        setStateTiming (4, 102.0, 4, 4);
-        setStateTiming (5, 104.0, 4, 4);
-        setStateArrangementBars (0, 6);
-        setStateArrangementBars (1, 12);
-        setStateArrangementBars (2, 6);
-        setStateArrangementBars (3, 14);
-        setStateArrangementBars (4, 8);
+        setStateDemo (0, "Breath", { { "Ground sine", "radiguecore" }, { "Low beating", "radiguebeating" }, { "Room air", "radigueair" } });
+        setStateDemo (1, "First partial", { { "Fundamental", "radiguecore" }, { "Upper beat", "radiguebeating" }, { "Narrow air", "radigueair" } });
+        setStateDemo (2, "Interference", { { "Beating pair", "radiguebeating" }, { "Formant veil", "radigueformant" }, { "Undertone", "radiguelow" }, { "Air thread", "radigueair" } });
+        setStateDemo (3, "Long veil", { { "Veil body", "radiguecore" }, { "Slow formant", "radigueformant" }, { "Dust band", "radigueair" } });
+        setStateDemo (4, "Narrowing", { { "Close tone", "radiguebeating" }, { "Filter line", "radigueformant" }, { "Low cloud", "radiguelow" } });
+        setStateDemo (5, "Bloom", { { "Bloom core", "radiguecore" }, { "Wide harmonic", "radigueharmonic" }, { "Bloom beat", "radiguebeating" }, { "Bloom air", "radigueair" }, { "Soft formant", "radigueformant" } });
+        setStateDemo (6, "Still centre", { { "Centre tone", "radiguecore" }, { "Harmonic field", "radigueharmonic" }, { "Sub breath", "radiguelow" }, { "Almost air", "radigueair" } });
+        setStateDemo (7, "Low cloud", { { "Deep partial", "radiguelow" }, { "Cloud beating", "radiguebeating" }, { "Muted formant", "radigueformant" } });
+        setStateDemo (8, "Bright thread", { { "Thin harmonic", "radigueformant" }, { "Thread beat", "radiguebeating" }, { "High air", "radigueair" } });
+        setStateDemo (9, "Return", { { "Return core", "radiguecore" }, { "Return low", "radiguelow" }, { "Returning air", "radigueair" } });
+
+        setStateTiming (0, 42.0, 4, 4);
+        setStateTiming (1, 44.0, 4, 4);
+        setStateTiming (2, 40.0, 5, 4);
+        setStateTiming (3, 38.0, 4, 4);
+        setStateTiming (4, 46.0, 3, 4);
+        setStateTiming (5, 42.0, 6, 4);
+        setStateTiming (6, 36.0, 4, 4);
+        setStateTiming (7, 39.0, 5, 4);
+        setStateTiming (8, 48.0, 4, 4);
+        setStateTiming (9, 41.0, 4, 4);
+
+        setStateArrangementBars (0, 4);
+        setStateArrangementBars (1, 4);
+        setStateArrangementBars (2, 5);
+        setStateArrangementBars (3, 6);
+        setStateArrangementBars (4, 4);
         setStateArrangementBars (5, 6);
+        setStateArrangementBars (6, 5);
+        setStateArrangementBars (7, 5);
+        setStateArrangementBars (8, 4);
+        setStateArrangementBars (9, 6);
 
         rules = {
-            { 0, 0, 6.0f }, { 0, 1, 1.0f },
-            { 1, 1, 12.0f }, { 1, 2, 1.0f },
-            { 2, 2, 6.0f }, { 2, 3, 1.0f },
-            { 3, 3, 14.0f }, { 3, 4, 1.0f },
-            { 4, 4, 8.0f }, { 4, 5, 1.0f },
-            { 5, 5, 6.0f }, { 5, 0, 1.0f }
+            { 0, 0, 5.0f }, { 0, 1, 1.0f },
+            { 1, 1, 4.0f }, { 1, 2, 1.0f },
+            { 2, 2, 6.0f }, { 2, 3, 1.0f }, { 2, 5, 0.35f },
+            { 3, 3, 7.0f }, { 3, 4, 1.0f },
+            { 4, 4, 4.0f }, { 4, 5, 1.0f },
+            { 5, 5, 8.0f }, { 5, 6, 1.0f }, { 5, 8, 0.45f },
+            { 6, 6, 7.0f }, { 6, 7, 1.0f },
+            { 7, 7, 5.0f }, { 7, 8, 1.0f },
+            { 8, 8, 4.0f }, { 8, 9, 1.0f },
+            { 9, 9, 6.0f }, { 9, 0, 1.0f }
         };
 
-        childMachines[1] = std::make_unique<MachineModel> (machineId + "_groove_child", lanePrefix + "groove-");
-        configureGrooveChild (*childMachines[1]);
+        childMachines[2] = std::make_unique<MachineModel> (machineId + "_interference_child", lanePrefix + "interference-");
+        auto& interference = *childMachines[2];
+        interference.setStateCount (5);
+        interference.timingMode = NestedTimingMode::followParent;
+        interference.parentDivision = 4;
+        interference.setStateDemo (0, "Left drift", { { "Left pair", "radiguebeating" }, { "Left air", "radigueair" } });
+        interference.setStateDemo (1, "Right drift", { { "Right pair", "radiguebeating" }, { "Right formant", "radigueformant" } });
+        interference.setStateDemo (2, "Low fold", { { "Fold low", "radiguelow" }, { "Fold core", "radiguecore" } });
+        interference.setStateDemo (3, "Still band", { { "Band formant", "radigueformant" }, { "Band air", "radigueair" } });
+        interference.setStateDemo (4, "Return beat", { { "Return pair", "radiguebeating" } });
+        interference.rules = { { 0, 0, 3.0f }, { 0, 1, 1.0f }, { 1, 1, 3.0f }, { 1, 2, 0.8f }, { 1, 3, 0.5f }, { 2, 4, 1.0f }, { 3, 4, 1.0f }, { 4, 0, 1.0f } };
+        interference.setAllLaneVolumes (0.36f);
 
-        childMachines[2] = std::make_unique<MachineModel> (machineId + "_bloom_child", lanePrefix + "bloom-");
-        configureBloomChild (*childMachines[2]);
+        interference.childMachines[1] = std::make_unique<MachineModel> (interference.machineId + "_slow_beads", interference.lanePrefix + "beads-");
+        auto& beads = *interference.childMachines[1];
+        beads.setStateCount (3);
+        beads.timingMode = NestedTimingMode::freeRun;
+        beads.parentDivision = 6;
+        beads.setStateDemo (0, "Bead A", { { "Bead tone", "radiguebeating" } });
+        beads.setStateDemo (1, "Bead B", { { "Bead air", "radigueair" } });
+        beads.setStateDemo (2, "Bead C", { { "Bead formant", "radigueformant" } });
+        beads.rules = { { 0, 0, 4.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
+        beads.setAllLaneVolumes (0.26f);
 
-        childMachines[3] = std::make_unique<MachineModel> (machineId + "_fracture_child", lanePrefix + "fracture-");
-        configureFractureChild (*childMachines[3]);
+        childMachines[5] = std::make_unique<MachineModel> (machineId + "_bloom_child", lanePrefix + "bloom-");
+        auto& bloom = *childMachines[5];
+        bloom.setStateCount (4);
+        bloom.timingMode = NestedTimingMode::followParent;
+        bloom.parentDivision = 5;
+        bloom.setStateDemo (0, "Opening", { { "Opening core", "radiguecore" }, { "Opening air", "radigueair" } });
+        bloom.setStateDemo (1, "Widen", { { "Widen pair", "radiguebeating" }, { "Widen formant", "radigueformant" } });
+        bloom.setStateDemo (2, "Held light", { { "Held core", "radiguecore" }, { "Held harmonic", "radigueharmonic" }, { "Held air", "radigueair" } });
+        bloom.setStateDemo (3, "Settle", { { "Settle low", "radiguelow" }, { "Settle beat", "radiguebeating" } });
+        bloom.rules = { { 0, 0, 4.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 2, 5.0f }, { 2, 3, 1.0f }, { 3, 0, 1.0f } };
+        bloom.setAllLaneVolumes (0.34f);
+
+        childMachines[8] = std::make_unique<MachineModel> (machineId + "_thread_child", lanePrefix + "thread-");
+        auto& thread = *childMachines[8];
+        thread.setStateCount (3);
+        thread.timingMode = NestedTimingMode::freeRun;
+        thread.parentDivision = 3;
+        thread.setStateDemo (0, "Harmonic", { { "Harmonic formant", "radigueformant" } });
+        thread.setStateDemo (1, "Dust", { { "Dust air", "radigueair" } });
+        thread.setStateDemo (2, "Beat", { { "Fine beat", "radiguebeating" } });
+        thread.rules = { { 0, 0, 5.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
+        thread.setAllLaneVolumes (0.28f);
 
         selectedState = 0;
         selectedLane = 0;

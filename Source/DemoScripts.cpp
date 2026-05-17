@@ -28,6 +28,89 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
     const auto melodicRoot = 50 + (stateIndex * 3) + (laneIndex * 5);
     const auto phraseRoot = 57 + (stateIndex * 2) + (laneIndex * 4);
     const auto textureHz = 150 + stateIndex * 34 + laneIndex * 21;
+    const auto radigueRoot = 42 + (stateIndex * 2) + (laneIndex * 3);
+    const auto radigueHz = 38 + (stateIndex * 5) + (laneIndex * 7);
+
+    if (baseRole == "radiguecore")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 14);\n"
+               "    var root = " + juce::String (radigueRoot) + ".midicps;\n"
+               "    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n"
+               "    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n"
+               "    var body = Splay.ar(partials, 0.26);\n"
+               "    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "radiguebeating")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 18);\n"
+               "    var root = " + juce::String (radigueRoot + 7) + ".midicps;\n"
+               "    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n"
+               "    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n"
+               "    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n"
+               "    var sig = Splay.ar(tones, 0.34) * slow;\n"
+               "    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "radigueair")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 16);\n"
+               "    var centre = LFNoise1.kr(0.012).range(" + juce::String (radigueHz + 180) + ", " + juce::String (radigueHz + 820) + ");\n"
+               "    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n"
+               "    var tone = SinOsc.ar([" + juce::String (radigueHz + 94) + ", " + juce::String (radigueHz + 96) + "] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n"
+               "    var sig = LPF.ar(air + tone, 2100);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "radigueformant")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 20);\n"
+               "    var root = " + juce::String (radigueRoot + 12) + ".midicps;\n"
+               "    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n"
+               "    var sweep = SinOsc.kr(0.009 + (" + juce::String (laneIndex) + " * 0.002)).range(260, 1180);\n"
+               "    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n"
+               "    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "radigueharmonic")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 24);\n"
+               "    var root = " + juce::String (radigueRoot + 5) + ".midicps;\n"
+               "    var chord = root * [0.5, 1, 1.25, 1.5, 2, 2.5];\n"
+               "    var wander = LFNoise1.kr([0.004, 0.006, 0.008, 0.011, 0.013, 0.017]).range(0.997, 1.003);\n"
+               "    var amps = [0.20, 0.16, 0.11, 0.09, 0.055, 0.035] * SinOsc.kr([0.015, 0.019, 0.023, 0.029, 0.034, 0.041]).range(0.52, 1.0);\n"
+               "    var bank = SinOsc.ar(chord * wander, 0, amps);\n"
+               "    var sig = Splay.ar(bank, 0.52);\n"
+               "    sig = RLPF.ar(sig, LFNoise1.kr(0.010).range(640, 1650), 0.38);\n"
+               "    sig = sig + (CombC.ar(sig, 0.9, [0.47, 0.61], 2.8) * 0.045);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 2400), 28)), 0.18) * active * vol * 0.30;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "radiguelow")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = Lag.kr(gate, 22);\n"
+               "    var root = " + juce::String (juce::jmax (28, radigueRoot - 12)) + ".midicps;\n"
+               "    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n"
+               "    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n"
+               "    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n"
+               "    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n"
+               "}.play;\n"
+               ")\n";
 
     if (baseRole == "pulse")
         return "(\n"
@@ -305,6 +388,12 @@ float volumeForRole (const juce::String& role)
     if (baseRole == "break")     return 0.20f;
     if (baseRole == "pulse")     return 0.35f;
     if (baseRole == "bass")      return 0.55f;
+    if (baseRole == "radiguecore")    return 0.62f;
+    if (baseRole == "radiguebeating") return 0.54f;
+    if (baseRole == "radigueair")     return 0.42f;
+    if (baseRole == "radigueformant") return 0.50f;
+    if (baseRole == "radigueharmonic") return 0.56f;
+    if (baseRole == "radiguelow")     return 0.48f;
     return 0.48f;
 }
 }
