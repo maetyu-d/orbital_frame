@@ -78,6 +78,7 @@ struct State
     double tempoBpm = 120.0;
     int beatsPerBar = 4;
     int beatUnit = 4;
+    int arrangementBars = 1;
 
     double secondsPerBar() const
     {
@@ -85,6 +86,19 @@ struct State
         const auto beats = juce::jlimit (1, 32, beatsPerBar);
         const auto unit = juce::jlimit (1, 32, beatUnit);
         return (60.0 / bpm) * static_cast<double> (beats) * (4.0 / static_cast<double> (unit));
+    }
+
+    double clockBeatsPerSection() const
+    {
+        const auto beats = juce::jlimit (1, 32, beatsPerBar);
+        const auto unit = juce::jlimit (1, 32, beatUnit);
+        const auto bars = juce::jlimit (1, 64, arrangementBars);
+        return static_cast<double> (beats) * (4.0 / static_cast<double> (unit)) * static_cast<double> (bars);
+    }
+
+    double secondsPerSection() const
+    {
+        return secondsPerBar() * static_cast<double> (juce::jlimit (1, 64, arrangementBars));
     }
 };
 
@@ -245,6 +259,12 @@ public:
         setStateTiming (3, 110.0, 4, 4);
         setStateTiming (4, 102.0, 4, 4);
         setStateTiming (5, 104.0, 4, 4);
+        setStateArrangementBars (0, 6);
+        setStateArrangementBars (1, 12);
+        setStateArrangementBars (2, 6);
+        setStateArrangementBars (3, 14);
+        setStateArrangementBars (4, 8);
+        setStateArrangementBars (5, 6);
 
         rules = {
             { 0, 0, 6.0f }, { 0, 1, 1.0f },
@@ -405,6 +425,11 @@ public:
         s.tempoBpm = juce::jlimit (20.0, 320.0, bpm);
         s.beatsPerBar = juce::jlimit (1, 32, beats);
         s.beatUnit = juce::jlimit (1, 32, unit);
+    }
+
+    void setStateArrangementBars (int stateIndex, int bars)
+    {
+        state (stateIndex).arrangementBars = juce::jlimit (1, 64, bars);
     }
 
     std::vector<State> states;

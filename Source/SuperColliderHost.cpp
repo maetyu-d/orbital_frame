@@ -163,11 +163,12 @@ juce::String machineAsSuperColliderEvent (const MachineModel& model)
                 lanes.add (lane.id);
 
         text << "(name: " << scStringLiteral (state.name)
-             << ", seconds: " << scFloatLiteral (state.secondsPerBar())
+             << ", seconds: " << scFloatLiteral (state.secondsPerSection())
              << ", bpm: " << scFloatLiteral (state.tempoBpm)
              << ", beats: " << scFloatLiteral (static_cast<double> (state.beatsPerBar))
              << ", unit: " << scFloatLiteral (static_cast<double> (state.beatUnit))
-             << ", clockBeats: " << scFloatLiteral (static_cast<double> (state.beatsPerBar) * (4.0 / static_cast<double> (state.beatUnit)))
+             << ", bars: " << scFloatLiteral (static_cast<double> (state.arrangementBars))
+             << ", clockBeats: " << scFloatLiteral (state.clockBeatsPerSection())
              << ", lanes: " << scSymbolArrayLiteral (lanes)
              << ", rules: [";
 
@@ -1121,7 +1122,7 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "~markovArmChildMachine = { |machine|\n"
                "    machine[\\selected] = machine[\\entry] ? 0;\n"
                "    (\"MARKOV_STATE \" ++ machine[\\id] ++ \" \" ++ machine[\\selected]).postln;\n"
-               "    SystemClock.sched(Server.default.latency ? 0, { ~markovJuce.sendMsg('/markov/state', machine[\\id], machine[\\selected]); nil });\n"
+               "    ~markovJuce.sendMsg('/markov/state', machine[\\id], machine[\\selected]);\n"
                "    ~markovStateLanes.(machine, machine[\\selected]);\n"
                "};\n"
                "~markovEnterMachineState = { |machine, next, force = false|\n"
@@ -1143,7 +1144,7 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    machine[\\selected] = next;\n"
                "    ~markovSetMachineTiming.(machine);\n"
                "    (\"MARKOV_STATE \" ++ machine[\\id] ++ \" \" ++ next).postln;\n"
-               "    SystemClock.sched(Server.default.latency ? 0, { ~markovJuce.sendMsg('/markov/state', machine[\\id], next); nil });\n"
+               "    ~markovJuce.sendMsg('/markov/state', machine[\\id], next);\n"
                "    playKeys = ~markovStateLanes.(machine, next);\n"
                "    nextChild = machine[\\states][next][\\child];\n"
                "    if (nextChild.notNil) { playKeys = playKeys ++ ~markovArmChildMachine.(nextChild) };\n"
@@ -1165,7 +1166,7 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var count = beatCount.max(1).asInteger;\n"
                "    var beat = beatIndex.clip(0, count - 1).asInteger;\n"
                "    var phase = beat / count;\n"
-               "    SystemClock.sched(Server.default.latency ? 0, { ~markovJuce.sendMsg('/markov/pulse', machine[\\id], selected, phase, beat, count); nil });\n"
+               "    ~markovJuce.sendMsg('/markov/pulse', machine[\\id], selected, phase, beat, count);\n"
                "};\n"
                "~markovSchedulePulses = { |machine, token|\n"
                "    var duration = ~markovMachineDuration.(machine);\n"
@@ -1188,11 +1189,20 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var scheduleNext;\n"
                "    ~markovMachineTokens[machine[\\id]] = token;\n"
                "    scheduleNext = {\n"
+               "        var duration;\n"
+               "        var durationSeconds;\n"
+               "        var from;\n"
+               "        var next;\n"
                "        ~markovSetMachineTiming.(machine);\n"
                "        ~markovSchedulePulses.(machine, token);\n"
-               "        ~markovMachineClock.sched(~markovMachineDuration.(machine), {\n"
+               "        duration = ~markovMachineDuration.(machine);\n"
+               "        durationSeconds = duration / (~markovMachineClock.tempo ? 1.0).max(0.05);\n"
+               "        from = machine[\\selected] ? machine[\\entry] ? 0;\n"
+               "        next = ~markovChooseNextState.(machine);\n"
+               "        ~markovJuce.sendMsg('/markov/scheduled', machine[\\id], from, next, durationSeconds);\n"
+               "        ~markovMachineClock.sched(duration, {\n"
                "            if (~markovMachineTokens[machine[\\id]] == token) {\n"
-               "                ~markovAdvanceMachine.(machine);\n"
+               "                ~markovEnterMachineState.(machine, next, false);\n"
                "                scheduleNext.value;\n"
                "            };\n"
                "            nil;\n"

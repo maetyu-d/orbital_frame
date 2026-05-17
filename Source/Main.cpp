@@ -96,7 +96,7 @@ public:
     explicit GraphComponent (MachineModel& machineToUse) : machine (&machineToUse)
     {
         setWantsKeyboardFocus (true);
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     void setMachine (MachineModel& machineToUse)
@@ -1461,12 +1461,19 @@ private:
     int selectedIndex = 0;
 };
 
-class ArrangementStripComponent final : public juce::Component
+class ArrangementStripComponent final : public juce::Component,
+                                        private juce::Timer
 {
 public:
     std::function<void (int)> onStateSelected;
     std::function<void (int, int)> onNestedStateSelected;
     std::function<void (int, int)> onLaneSelected;
+    std::function<void (int, int)> onStateLengthChanged;
+
+    ArrangementStripComponent()
+    {
+        startTimerHz (60);
+    }
 
     void setMachine (MachineModel& rootMachine, double playbackRate, bool showExtended, bool exporting, double exportElapsed, double exportTotal)
     {
@@ -1486,7 +1493,20 @@ public:
         {
             if (handleZoomControlClick (event.position))
                 return;
+        }
 
+        if (const auto handleState = lengthHandleStateAt (event.position); handleState >= 0)
+        {
+            resizingStateIndex = handleState;
+            resizingStartX = event.position.x;
+            resizingStartBars = machine != nullptr ? machine->state (handleState).arrangementBars : 1;
+            resizingStartWidth = sectionBounds (lengthEditRow(), totalSeconds(), handleState, false).getWidth();
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+            return;
+        }
+
+        if (extended)
+        {
             if (auto hit = hitTestExtended (event.position); hit.kind != Hit::none)
             {
                 if (hit.kind == Hit::nestedState && onNestedStateSelected)
@@ -1503,21 +1523,51 @@ public:
             onStateSelected (index);
     }
 
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (resizingStateIndex < 0 || machine == nullptr || onStateLengthChanged == nullptr)
+            return;
+
+        const auto pixelsPerBar = resizingStartWidth / static_cast<float> (juce::jmax (1, resizingStartBars));
+        const auto deltaBars = juce::roundToInt ((event.position.x - resizingStartX) / juce::jmax (8.0f, pixelsPerBar));
+        const auto newBars = juce::jlimit (1, 64, resizingStartBars + deltaBars);
+        if (newBars != machine->state (resizingStateIndex).arrangementBars)
+        {
+            onStateLengthChanged (resizingStateIndex, newBars);
+            repaint();
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        resizingStateIndex = -1;
+        resizingStartBars = 1;
+        resizingStartWidth = 1.0f;
+    }
+
     void mouseMove (const juce::MouseEvent& event) override
     {
         auto nextHover = hitAt (event.position);
+        const auto lengthHandleState = lengthHandleStateAt (event.position);
         const auto zoomControl = extended ? zoomControlAt (event.position) : ZoomControl::none;
-        const auto interactive = nextHover.kind != Hit::none || zoomControl != ZoomControl::none;
+        const auto interactive = nextHover.kind != Hit::none || zoomControl != ZoomControl::none || lengthHandleState >= 0;
 
-        setMouseCursor (interactive ? juce::MouseCursor::PointingHandCursor
-                                    : juce::MouseCursor::NormalCursor);
-        const auto nextHint = zoomControl != ZoomControl::none ? zoomTooltip (zoomControl)
-                                                               : tooltipFor (nextHover);
+        if (lengthHandleState >= 0)
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        else
+            setMouseCursor (interactive ? juce::MouseCursor::PointingHandCursor
+                                        : juce::MouseCursor::NormalCursor);
+        const auto nextHint = lengthHandleState >= 0 ? "Drag section length"
+                                                     : tooltipFor (nextHover);
 
-        if (! sameHit (hoveredHit, nextHover) || hoveredZoomControl != zoomControl || hoverHint != nextHint)
+        if (! sameHit (hoveredHit, nextHover)
+            || hoveredZoomControl != zoomControl
+            || hoveredLengthHandleState != lengthHandleState
+            || hoverHint != nextHint)
         {
             hoveredHit = nextHover;
             hoveredZoomControl = zoomControl;
+            hoveredLengthHandleState = lengthHandleState;
             hoverHint = nextHint;
             repaint();
         }
@@ -1527,8 +1577,43 @@ public:
     {
         hoveredHit = {};
         hoveredZoomControl = ZoomControl::none;
+        hoveredLengthHandleState = -1;
         hoverHint = {};
         setMouseCursor (juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+
+    void setTimingPulse (const juce::String& machineIdToUse, int stateIndexToUse, float phaseToUse, int beatIndexToUse, int beatCountToUse)
+    {
+        juce::ignoreUnused (phaseToUse, beatIndexToUse, beatCountToUse);
+
+        if (machine == nullptr || machineIdToUse != machine->machineId || stateIndexToUse < 0 || stateIndexToUse >= machine->getStateCount())
+            return;
+
+        if (playheadMachineId != machineIdToUse || playheadStateIndex != stateIndexToUse || playheadAnchorMs <= 0.0)
+            setPlaybackState (machineIdToUse, stateIndexToUse);
+    }
+
+    void setPlaybackState (const juce::String& machineIdToUse, int stateIndexToUse)
+    {
+        if (machine == nullptr || machineIdToUse != machine->machineId || stateIndexToUse < 0 || stateIndexToUse >= machine->getStateCount())
+            return;
+
+        playheadMachineId = machineIdToUse;
+        playheadStateIndex = stateIndexToUse;
+        playheadPhaseOffset = 0.0f;
+        playheadDurationSeconds = stateDurationSeconds (machine->state (stateIndexToUse));
+        playheadAnchorMs = juce::Time::getMillisecondCounterHiRes() - visualSchedulerCompensationMs;
+        repaint();
+    }
+
+    void clearTimingPulse()
+    {
+        playheadMachineId.clear();
+        playheadStateIndex = -1;
+        playheadPhaseOffset = 0.0f;
+        playheadAnchorMs = 0.0;
+        playheadDurationSeconds = 0.0;
         repaint();
     }
 
@@ -1569,7 +1654,7 @@ public:
         g.drawFittedText ("Arrangement", titleArea.removeFromLeft (112), juce::Justification::centredLeft, 1);
         g.setColour (mutedInk().withAlpha (0.74f));
         g.setFont (juce::FontOptions (10.5f));
-        g.drawFittedText (juce::String (machine->getStateCount()) + " bars  "
+        g.drawFittedText (juce::String (totalArrangementBars()) + " bars  "
                             + juce::String (total, 1) + "s cycle  x" + juce::String (rate, 2),
                           titleArea, juce::Justification::centredLeft, 1);
         if (extended)
@@ -1602,11 +1687,19 @@ public:
         drawTransitionFlow (g, content, total, flowArea);
         drawRuler (g, content, total);
         drawExportProgress (g, content, total);
+        drawPlayhead (g, content, total);
         drawHoverHighlight (g, content, total);
+        drawLengthHandleHighlight (g, total);
         g.restoreState();
     }
 
 private:
+    void timerCallback() override
+    {
+        if (isShowing() && playheadAnchorMs > 0.0)
+            repaint();
+    }
+
     struct Hit
     {
         enum Kind
@@ -1654,7 +1747,7 @@ private:
 
     double stateDurationSeconds (const State& state) const
     {
-        return juce::jmax (0.1, state.secondsPerBar() / rate);
+        return juce::jmax (0.1, state.secondsPerSection() / rate);
     }
 
     double totalSeconds() const
@@ -1662,6 +1755,14 @@ private:
         auto total = 0.0;
         for (const auto& state : machine->states)
             total += stateDurationSeconds (state);
+        return total;
+    }
+
+    int totalArrangementBars() const
+    {
+        auto total = 0;
+        for (const auto& state : machine->states)
+            total += juce::jlimit (1, 64, state.arrangementBars);
         return total;
     }
 
@@ -1674,6 +1775,13 @@ private:
     {
         return extended ? timeline.withTrimmedLeft (70.0f).reduced (0.0f, 1.0f)
                         : timeline.reduced (0.0f, 2.0f);
+    }
+
+    juce::Rectangle<float> lengthEditRow() const
+    {
+        const auto timeline = timelineArea();
+        const auto content = contentArea (timeline);
+        return extended ? extendedRowsFor (content).top : content;
     }
 
     ExtendedRows extendedRowsFor (juce::Rectangle<float> content) const
@@ -1735,6 +1843,33 @@ private:
 
         const auto index = stateIndexAt (point);
         return index >= 0 ? Hit { Hit::topState, index, -1 } : Hit {};
+    }
+
+    int lengthHandleStateAt (juce::Point<float> point) const
+    {
+        if (machine == nullptr || machine->states.empty())
+            return -1;
+
+        if (extended && zoomControlAt (point) != ZoomControl::none)
+            return -1;
+
+        const auto total = totalSeconds();
+        if (total <= 0.0)
+            return -1;
+
+        const auto row = lengthEditRow();
+        if (! row.expanded (0.0f, 5.0f).contains (point))
+            return -1;
+
+        for (int i = 0; i < machine->getStateCount(); ++i)
+        {
+            auto bounds = sectionBounds (row, total, i, false);
+            auto handle = bounds.removeFromRight (juce::jmin (12.0f, juce::jmax (7.0f, bounds.getWidth() * 0.12f))).expanded (2.0f, 4.0f);
+            if (handle.contains (point))
+                return i;
+        }
+
+        return -1;
     }
 
     void drawSections (juce::Graphics& g, juce::Rectangle<float> area, double total, bool includeExtendedDetails = true)
@@ -1919,19 +2054,6 @@ private:
         return {};
     }
 
-    juce::String zoomTooltip (ZoomControl control) const
-    {
-        if (control == ZoomControl::zoomOut)
-            return "Zoom arrangement out";
-        if (control == ZoomControl::zoomIn)
-            return "Zoom arrangement in";
-        if (control == ZoomControl::fit)
-            return "Fit whole arrangement";
-        if (control == ZoomControl::readout)
-            return "Arrangement zoom";
-        return {};
-    }
-
     ZoomControlBounds zoomControlBounds() const
     {
         const auto top = getLocalBounds().toFloat().reduced (12.0f, 7.0f).withHeight (22.0f);
@@ -2050,6 +2172,64 @@ private:
         g.drawRoundedRectangle (highlight, 6.0f, 1.3f);
     }
 
+    float currentPlayheadPhase() const
+    {
+        if (machine == nullptr || playheadAnchorMs <= 0.0 || playheadStateIndex < 0 || playheadStateIndex >= machine->getStateCount())
+            return 0.0f;
+
+        const auto duration = juce::jmax (0.1, playheadDurationSeconds);
+        const auto age = (juce::Time::getMillisecondCounterHiRes() - playheadAnchorMs) / 1000.0;
+        return juce::jlimit (0.0f, 1.0f, static_cast<float> (static_cast<double> (playheadPhaseOffset) + (age / duration)));
+    }
+
+    void drawPlayhead (juce::Graphics& g, juce::Rectangle<float> content, double total)
+    {
+        if (machine == nullptr || playheadMachineId != machine->machineId || playheadStateIndex < 0 || playheadStateIndex >= machine->getStateCount())
+            return;
+
+        const auto section = sectionBounds (extended ? extendedRowsFor (content).top : content, total, playheadStateIndex, false);
+        if (section.isEmpty())
+            return;
+
+        const auto x = section.getX() + section.getWidth() * currentPlayheadPhase();
+        if (x < content.getX() - 2.0f || x > content.getRight() + 2.0f)
+            return;
+
+        const auto colour = graphColour (playheadStateIndex).brighter (0.25f);
+        g.setColour (colour.withAlpha (0.13f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (x - 7.0f, content.getY() + 16.0f, 14.0f, content.getHeight() - 22.0f), 6.0f);
+        g.setColour (colour.withAlpha (0.96f));
+        g.drawVerticalLine (juce::roundToInt (x), content.getY() + 15.0f, content.getBottom() - 5.0f);
+        g.fillEllipse (x - 3.2f, section.getY() - 2.0f, 6.4f, 6.4f);
+    }
+
+    void drawLengthHandleHighlight (juce::Graphics& g, double total)
+    {
+        if (machine == nullptr || total <= 0.0)
+            return;
+
+        const auto stateIndex = resizingStateIndex >= 0 ? resizingStateIndex : hoveredLengthHandleState;
+        if (stateIndex < 0 || stateIndex >= machine->getStateCount())
+            return;
+
+        auto bounds = sectionBounds (lengthEditRow(), total, stateIndex, false);
+        const auto colour = graphColour (stateIndex);
+        const auto x = bounds.getRight();
+        g.setColour (colour.withAlpha (resizingStateIndex >= 0 ? 0.95f : 0.72f));
+        g.drawLine (juce::Line<float> ({ x, bounds.getY() + 7.0f }, { x, bounds.getBottom() - 7.0f }),
+                    resizingStateIndex >= 0 ? 2.2f : 1.5f);
+
+        auto badge = juce::Rectangle<float> (x - 22.0f, bounds.getBottom() - 19.0f, 42.0f, 17.0f);
+        g.setColour (juce::Colour (0xff0b0e13).withAlpha (0.86f));
+        g.fillRoundedRectangle (badge, 5.0f);
+        g.setColour (colour.withAlpha (0.88f));
+        g.drawRoundedRectangle (badge.reduced (0.5f), 5.0f, 1.0f);
+        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.setColour (ink().withAlpha (0.88f));
+        g.drawFittedText (juce::String (machine->state (stateIndex).arrangementBars) + "b",
+                          badge.toNearestInt().reduced (2, 0), juce::Justification::centred, 1);
+    }
+
     void drawNestedRow (juce::Graphics& g, juce::Rectangle<float> area, double total)
     {
         for (int i = 0; i < machine->getStateCount(); ++i)
@@ -2085,6 +2265,7 @@ private:
                           juce::Colour colour,
                           bool selected)
     {
+        juce::ignoreUnused (stateIndex);
         auto textArea = segment.toNearestInt().reduced (9, 7).withTrimmedTop (4);
         if (segment.getWidth() < 72.0f)
         {
@@ -2100,7 +2281,8 @@ private:
         const auto timing = juce::String (state.tempoBpm, 0) + " BPM  "
                           + juce::String (state.beatsPerBar) + "/" + juce::String (state.beatUnit);
         const auto detail = juce::String (seconds, 1) + "s";
-        const auto holdWeight = selfWeightFor (stateIndex);
+        const auto sectionBars = juce::jlimit (1, 64, state.arrangementBars);
+        const auto lengthText = juce::String (sectionBars) + (sectionBars == 1 ? " bar" : " bars");
         g.setFont (juce::FontOptions (10.0f));
         g.setColour (mutedInk().withAlpha (selected ? 0.84f : 0.64f));
 
@@ -2111,10 +2293,9 @@ private:
 
         if (segment.getWidth() > 112.0f)
         {
-            const auto holdText = holdWeight > 0.0f ? "hold " + juce::String (holdWeight, 1) : "advance";
             g.setColour (mutedInk().withAlpha (selected ? 0.74f : 0.50f));
             g.setFont (juce::FontOptions (9.0f));
-            g.drawFittedText (holdText + "  " + detail, textArea.removeFromTop (13), juce::Justification::centredLeft, 1);
+            g.drawFittedText (lengthText + "  " + detail, textArea.removeFromTop (13), juce::Justification::centredLeft, 1);
         }
     }
 
@@ -2370,6 +2551,17 @@ private:
     double exportTotalSeconds = 0.0;
     Hit hoveredHit;
     ZoomControl hoveredZoomControl = ZoomControl::none;
+    int hoveredLengthHandleState = -1;
+    int resizingStateIndex = -1;
+    int resizingStartBars = 1;
+    float resizingStartX = 0.0f;
+    float resizingStartWidth = 1.0f;
+    juce::String playheadMachineId;
+    int playheadStateIndex = -1;
+    float playheadPhaseOffset = 0.0f;
+    double playheadAnchorMs = 0.0;
+    double playheadDurationSeconds = 0.0;
+    static constexpr double visualSchedulerCompensationMs = 0.0;
     juce::String hoverHint;
 };
 
@@ -4513,6 +4705,7 @@ public:
             addListener (this, "/markov/state");
             addListener (this, "/markov/meter");
             addListener (this, "/markov/pulse");
+            addListener (this, "/markov/scheduled");
             addListener (this, "/markov/frozen");
             addListener (this, "/markov/exported");
             addListener (this, "/markov/exportProgress");
@@ -4578,6 +4771,10 @@ public:
                 host.pauseMachine();
                 host.stopAll (machine);
                 graph.clearTimingPulse();
+                arrangementStrip.clearTimingPulse();
+                visualNextStateMs = 0.0;
+                scheduledTransitionTargetMs = 0.0;
+                scheduledVisualNextState = -1;
                 runButton.setButtonText ("Run");
             }
         };
@@ -4595,6 +4792,10 @@ public:
             host.pauseMachine();
             host.stopAll (machine);
             graph.clearTimingPulse();
+            arrangementStrip.clearTimingPulse();
+            visualNextStateMs = 0.0;
+            scheduledTransitionTargetMs = 0.0;
+            scheduledVisualNextState = -1;
             refreshControls();
         };
 
@@ -4606,6 +4807,10 @@ public:
             runButton.setButtonText ("Run");
             host.panic (machine);
             graph.clearTimingPulse();
+            arrangementStrip.clearTimingPulse();
+            visualNextStateMs = 0.0;
+            scheduledTransitionTargetMs = 0.0;
+            scheduledVisualNextState = -1;
             refreshControls();
         };
 
@@ -4682,6 +4887,16 @@ public:
             machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
             machine.selectedLane = juce::jlimit (0, machine.getLaneCount (machine.selectedState) - 1, laneIndex);
             inspectedMachine = &machine;
+            refreshControls();
+        };
+
+        arrangementStrip.onStateLengthChanged = [this] (int stateIndex, int bars)
+        {
+            machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            machine.state (machine.selectedState).arrangementBars = juce::jlimit (1, 64, bars);
+            inspectedMachine = &machine;
+            transportIntervalMs = getTransportIntervalMs();
+            markMachineDirty (UndoGroup::continuous);
             refreshControls();
         };
 
@@ -4988,7 +5203,7 @@ public:
         restoreLastProject();
         resetUndoHistory();
         setWantsKeyboardFocus (true);
-        startTimer (1000);
+        startTimerHz (30);
         juce::Timer::callAfterDelay (350, [safeThis = juce::Component::SafePointer<MainComponent> (this)]
         {
             if (safeThis != nullptr)
@@ -5692,6 +5907,12 @@ private:
             return;
         }
 
+        if (address == "/markov/scheduled")
+        {
+            handleScheduledTransitionMessage (message);
+            return;
+        }
+
         if (address == "/markov/frozen")
         {
             handleFrozenMessage (message);
@@ -5741,7 +5962,37 @@ private:
         const auto beatCount = message[4].isInt32() ? message[4].getInt32() : static_cast<int> (getOscFloat (message[4]));
 
         graph.setTimingPulse (machineId, stateIndex, phase, beatIndex, beatCount);
+        arrangementStrip.setTimingPulse (machineId, stateIndex, phase, beatIndex, beatCount);
         updateTransitionPreview();
+    }
+
+    void handleScheduledTransitionMessage (const juce::OSCMessage& message)
+    {
+        if (message.size() < 4 || ! message[0].isString())
+            return;
+
+        const auto machineId = message[0].getString();
+        if (machineId != machine.machineId)
+            return;
+
+        const auto fromState = message[1].isInt32() ? message[1].getInt32() : static_cast<int> (getOscFloat (message[1]));
+        const auto nextState = message[2].isInt32() ? message[2].getInt32() : static_cast<int> (getOscFloat (message[2]));
+        const auto durationSeconds = juce::jmax (0.05f, getOscFloat (message[3]));
+
+        if (nextState < 0 || nextState >= machine.getStateCount())
+            return;
+
+        scheduledVisualFromState = fromState;
+        scheduledVisualNextState = nextState;
+        scheduledTransitionTargetMs = juce::Time::getMillisecondCounterHiRes() + static_cast<double> (durationSeconds) * 1000.0;
+        visualNextStateMs = scheduledTransitionTargetMs;
+        appendLog ("Scheduled visual: "
+                   + (fromState >= 0 && fromState < machine.getStateCount() ? machine.state (fromState).name : juce::String ("?"))
+                   + " -> " + machine.state (nextState).name
+                   + " in " + juce::String (durationSeconds, 3) + "s");
+        graph.setTransitionPreview (nextState, 1.0f);
+        graph.repaint();
+        arrangementStrip.repaint();
     }
 
     void handleFrozenMessage (const juce::OSCMessage& message)
@@ -5817,7 +6068,14 @@ private:
 
     void timerCallback() override
     {
-        autosaveIfNeeded (false);
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (now - lastAutosaveTimerMs >= 1000.0)
+        {
+            lastAutosaveTimerMs = now;
+            autosaveIfNeeded (false);
+        }
+
+        tickVisualScheduler (now);
     }
 
     float getOscFloat (const juce::OSCArgument& argument) const
@@ -6158,6 +6416,7 @@ private:
         object->setProperty ("tempoBpm", state.tempoBpm);
         object->setProperty ("beatsPerBar", state.beatsPerBar);
         object->setProperty ("beatUnit", state.beatUnit);
+        object->setProperty ("arrangementBars", state.arrangementBars);
 
         juce::Array<juce::var> lanes;
         for (const auto& lane : state.lanes)
@@ -6422,6 +6681,7 @@ private:
             state.tempoBpm = juce::jlimit (20.0, 320.0, static_cast<double> (stateVar.getProperty ("tempoBpm", 120.0)));
             state.beatsPerBar = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatsPerBar", 4)));
             state.beatUnit = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatUnit", 4)));
+            state.arrangementBars = juce::jlimit (1, 64, static_cast<int> (stateVar.getProperty ("arrangementBars", 1)));
             state.lanes.clear();
 
             if (auto* lanesArray = stateVar.getProperty ("lanes", {}).getArray())
@@ -6623,12 +6883,12 @@ private:
         }
         else if (settings.range == "state")
         {
-            musicalSeconds = machine.state (machine.selectedState).secondsPerBar() / rate;
+            musicalSeconds = machine.state (machine.selectedState).secondsPerSection() / rate;
         }
         else
         {
             for (const auto& state : machine.states)
-                musicalSeconds += state.secondsPerBar() / rate;
+                musicalSeconds += state.secondsPerSection() / rate;
 
             musicalSeconds *= static_cast<double> (settings.cycles);
         }
@@ -6742,11 +7002,34 @@ private:
         if (stateIndex < 0 || stateIndex >= machine.getStateCount())
             return;
 
-        machine.selectedState = stateIndex;
-        machine.selectedLane = juce::jlimit (0, machine.getLaneCount (stateIndex) - 1, 0);
-        primeMetersForActiveState (machine);
+        logSchedulerDrift (stateIndex);
+        setVisualStateImmediate (stateIndex, true);
         updateTransitionPreview();
-        refreshControls();
+        deferPostStateUiRefresh();
+    }
+
+    void logSchedulerDrift (int confirmedState)
+    {
+        if (scheduledTransitionTargetMs <= 0.0 || scheduledVisualNextState < 0)
+            return;
+
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto driftMs = now - scheduledTransitionTargetMs;
+        appendLog ("Transition drift: planned "
+                   + (scheduledVisualFromState >= 0 ? machine.state (scheduledVisualFromState).name : juce::String ("?"))
+                   + " -> "
+                   + (scheduledVisualNextState >= 0 && scheduledVisualNextState < machine.getStateCount()
+                        ? machine.state (scheduledVisualNextState).name
+                        : juce::String ("?"))
+                   + ", confirmed "
+                   + (confirmedState >= 0 && confirmedState < machine.getStateCount()
+                        ? machine.state (confirmedState).name
+                        : juce::String ("?"))
+                   + ", drift " + juce::String (driftMs, 1) + " ms");
+
+        scheduledTransitionTargetMs = 0.0;
+        scheduledVisualNextState = -1;
+        scheduledVisualFromState = -1;
     }
 
     std::pair<int, float> mostLikelyNextState (const MachineModel& model) const
@@ -6787,8 +7070,73 @@ private:
         return { bestState, bestWeight / total };
     }
 
+    void setVisualStateImmediate (int stateIndex, bool fromScheduler)
+    {
+        if (stateIndex < 0 || stateIndex >= machine.getStateCount())
+            return;
+
+        machine.selectedState = stateIndex;
+        machine.selectedLane = juce::jlimit (0, machine.getLaneCount (stateIndex) - 1, 0);
+        arrangementStrip.setPlaybackState (machine.machineId, stateIndex);
+        scheduleNextVisualBoundary();
+
+        if (fromScheduler)
+            lastSchedulerStateMs = juce::Time::getMillisecondCounterHiRes();
+
+        graph.repaint();
+        arrangementStrip.repaint();
+        stateTabs.repaint();
+    }
+
+    void scheduleNextVisualBoundary()
+    {
+        if (! fsmRunning || machine.selectedState < 0 || machine.selectedState >= machine.getStateCount())
+        {
+            visualNextStateMs = 0.0;
+            return;
+        }
+
+        const auto durationMs = machine.state (machine.selectedState).secondsPerSection()
+                              * 1000.0 / juce::jmax (0.05, rateSlider.getValue());
+        visualNextStateMs = juce::Time::getMillisecondCounterHiRes() + juce::jmax (40.0, durationMs);
+    }
+
+    void tickVisualScheduler (double now)
+    {
+        if (! fsmRunning || visualNextStateMs <= 0.0 || now < visualNextStateMs)
+            return;
+
+        const auto nextState = scheduledVisualNextState >= 0 ? scheduledVisualNextState
+                                                             : (machine.selectedState + 1) % machine.getStateCount();
+        setVisualStateImmediate (nextState, false);
+        updateTransitionPreview();
+    }
+
+    void deferPostStateUiRefresh()
+    {
+        if (deferredStateRefreshPending)
+            return;
+
+        deferredStateRefreshPending = true;
+        juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->deferredStateRefreshPending = false;
+            safeThis->primeMetersForActiveState (safeThis->machine);
+            safeThis->refreshControls();
+        });
+    }
+
     void updateTransitionPreview()
     {
+        if (scheduledVisualNextState >= 0)
+        {
+            graph.setTransitionPreview (scheduledVisualNextState, 1.0f);
+            return;
+        }
+
         const auto [stateIndex, probability] = mostLikelyNextState (currentMachine());
         graph.setTransitionPreview (stateIndex, probability);
     }
@@ -6993,6 +7341,7 @@ private:
         return s.name + "  |  " + juce::String (laneCount) + (laneCount == 1 ? " track" : " tracks")
              + "  |  " + juce::String (s.tempoBpm, 1) + " BPM"
              + "  |  " + juce::String (s.beatsPerBar) + "/" + juce::String (s.beatUnit)
+             + "  |  " + juce::String (s.arrangementBars) + (s.arrangementBars == 1 ? " bar" : " bars")
              + "  |  " + activeText + "  |  " + nestedText;
     }
 
@@ -7161,6 +7510,7 @@ private:
         host.configureMachine (machine);
         applyAllMixToHost();
         primeMetersForActiveState (machine);
+        setVisualStateImmediate (machine.selectedState, false);
         host.runMachine (machine.selectedState, rateSlider.getValue());
         refreshControls();
     }
@@ -7243,7 +7593,7 @@ private:
     {
         const auto& state = machine.state (machine.selectedState);
         const auto rate = juce::jmax (0.05, rateSlider.getValue());
-        return juce::jlimit (80, 120000, static_cast<int> (state.secondsPerBar() * 1000.0 / rate));
+        return juce::jlimit (80, 120000, static_cast<int> (state.secondsPerSection() * 1000.0 / rate));
     }
 
     double getTransportRateHz() const
@@ -7706,7 +8056,7 @@ private:
         lane.frozenAudioPath = freezeFileForLane (lane).getFullPathName();
         lane.preparedBridge = -1;
 
-        const auto duration = state.secondsPerBar() / juce::jmax (0.05, rateSlider.getValue());
+        const auto duration = state.secondsPerSection() / juce::jmax (0.05, rateSlider.getValue());
         if (host.freezeLane (lane, getSclangPathOverride(), duration, juce::File (lane.frozenAudioPath)))
             return true;
 
@@ -8143,6 +8493,13 @@ private:
     UndoGroup lastUndoGroup = UndoGroup::structural;
     double lastUndoSnapshotMs = 0.0;
     double lastDirtyMs = 0.0;
+    double lastAutosaveTimerMs = 0.0;
+    double visualNextStateMs = 0.0;
+    double lastSchedulerStateMs = 0.0;
+    double scheduledTransitionTargetMs = 0.0;
+    int scheduledVisualFromState = -1;
+    int scheduledVisualNextState = -1;
+    bool deferredStateRefreshPending = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
