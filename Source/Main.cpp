@@ -1702,8 +1702,23 @@ public:
         }
 
         auto timeline = timelineArea();
-        g.setColour (juce::Colour (0xff0c0f14).withAlpha (0.60f));
+        g.setColour (juce::Colour (0xff0c0f14).withAlpha (extended ? 0.50f : 0.60f));
         g.fillRoundedRectangle (timeline, 4.0f);
+        if (extended)
+        {
+            const auto content = contentArea (timeline);
+            const auto rows = extendedRowsFor (content);
+            auto stripe = [&g] (juce::Rectangle<float> row, float alpha)
+            {
+                g.setColour (juce::Colour (0xff141922).withAlpha (alpha));
+                g.fillRoundedRectangle (row.reduced (0.0f, 2.0f), 5.0f);
+            };
+
+            stripe (rows.top, 0.32f);
+            stripe (rows.flow, 0.18f);
+            stripe (rows.nested, 0.16f);
+            stripe (rows.lanes, 0.14f);
+        }
 
         if (total <= 0.0)
             return;
@@ -4661,7 +4676,7 @@ public:
             startPrepareJob (false);
         };
 
-        masterGainLabel.setText ("Master", juce::dontSendNotification);
+        masterGainLabel.setText ("Vol", juce::dontSendNotification);
         masterGainLabel.setFont (juce::FontOptions (11.5f, juce::Font::bold));
         masterGainLabel.setColour (juce::Label::textColourId, mutedInk());
         masterGainLabel.setJustificationType (juce::Justification::centredLeft);
@@ -5510,16 +5525,16 @@ public:
         auto header = area.removeFromTop (46);
         auto headerInner = header.reduced (10, 7);
         title.setBounds (headerInner.removeFromLeft (52));
-        projectFileLabel.setBounds (headerInner.removeFromLeft (140).reduced (2, 2));
-        statusLabel.setBounds (headerInner.removeFromLeft (96).reduced (4, 2));
+        projectFileLabel.setBounds (headerInner.removeFromLeft (132).reduced (2, 2));
+        statusLabel.setBounds (headerInner.removeFromLeft (86).reduced (4, 2));
 
-        auto topCountArea = headerInner.removeFromRight (154);
+        auto topCountArea = headerInner.removeFromRight (148);
         topStateCountLabel.setBounds (topCountArea.removeFromLeft (48).reduced (2, 2));
-        topStateCountMinus.setBounds (topCountArea.removeFromLeft (27).reduced (2, 0));
-        topStateCountEditor.setBounds (topCountArea.removeFromLeft (38).reduced (2, 0));
-        topStateCountPlus.setBounds (topCountArea.removeFromLeft (27).reduced (2, 0));
+        topStateCountMinus.setBounds (topCountArea.removeFromLeft (26).reduced (2, 0));
+        topStateCountEditor.setBounds (topCountArea.removeFromLeft (36).reduced (2, 0));
+        topStateCountPlus.setBounds (topCountArea.removeFromLeft (26).reduced (2, 0));
         headerInner.removeFromRight (8);
-        rateSlider.setBounds (headerInner.removeFromRight (136).reduced (4, 0));
+        rateSlider.setBounds (headerInner.removeFromRight (122).reduced (4, 0));
 
         auto buttonRow = headerInner;
         auto addButton = [&buttonRow] (juce::Button& button, int width)
@@ -5534,22 +5549,22 @@ public:
         };
         auto addGap = [&buttonRow] (int width) { buttonRow.removeFromLeft (width); };
 
-        masterGainLabel.setBounds (buttonRow.removeFromLeft (38).reduced (3, 2));
-        masterGainSlider.setBounds (buttonRow.removeFromLeft (76).reduced (3, 0));
+        masterGainLabel.setBounds (buttonRow.removeFromLeft (28).reduced (3, 2));
+        masterGainSlider.setBounds (buttonRow.removeFromLeft (84).reduced (3, 0));
         addGap (5);
         addButton (runButton, 66);
-        addButton (stepButton, 52);
-        addButton (stopAllButton, 68);
+        addButton (stepButton, 54);
+        addButton (stopAllButton, 64);
         addButton (panicButton, 66);
         addGap (7);
-        addButton (loadProjectButton, 52);
-        addButton (saveProjectButton, 52);
+        addButton (loadProjectButton, 54);
+        addButton (saveProjectButton, 54);
         addGap (6);
-        addButton (undoButton, 50);
-        addButton (redoButton, 50);
+        addButton (undoButton, 60);
+        addButton (redoButton, 56);
         addGap (6);
-        addButton (logButton, 42);
-        addButton (arrangementViewButton, 62);
+        addButton (logButton, 48);
+        addButton (arrangementViewButton, 76);
 
         if (buttonRow.getWidth() >= 102)
         {
