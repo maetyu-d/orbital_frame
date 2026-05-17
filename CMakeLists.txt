@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MarkovFSM VERSION 0.1.0 LANGUAGES C CXX)
+project(wf VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,23 +8,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(JUCE_PATH "../Granny/JUCE" CACHE PATH "Path to a local JUCE checkout")
 add_subdirectory("${JUCE_PATH}" JUCE)
 
-juce_add_gui_app(MarkovFSM
-    PRODUCT_NAME "Markov FSM"
-    COMPANY_NAME "Markov"
-    BUNDLE_ID "com.markov.fsm")
+juce_add_gui_app(wf
+    PRODUCT_NAME "wf"
+    COMPANY_NAME "wf"
+    BUNDLE_ID "space.matd.wf")
 
-target_sources(MarkovFSM
+target_sources(wf
     PRIVATE
         Source/DemoScripts.cpp
         Source/SuperColliderHost.cpp
         Source/Main.cpp)
 
-target_compile_definitions(MarkovFSM
+target_compile_definitions(wf
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0)
 
-target_link_libraries(MarkovFSM
+target_link_libraries(wf
     PRIVATE
         juce::juce_audio_devices
         juce::juce_audio_utils

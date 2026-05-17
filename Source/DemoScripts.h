@@ -2,7 +2,7 @@
 
 #include <juce_core/juce_core.h>
 
-namespace MarkovDemo
+namespace WfDemo
 {
 juce::String defaultScriptFor (int stateIndex, int laneIndex);
 juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIndex);

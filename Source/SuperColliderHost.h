@@ -65,6 +65,7 @@ public:
                      double releaseSeconds = musicalReleaseSeconds,
                      double delaySeconds = 0.0);
     void stopAll (MachineModel& model);
+    void resetProjectState (const juce::String& sclangPath);
     bool isReady() const;
     int getBridgeGeneration() const;
     void panic (MachineModel& model);
@@ -73,6 +74,7 @@ public:
     void pauseMachine();
     void stepMachine();
     void cancelExport();
+    void setMasterGain (float gain);
     void testTone (const juce::String& sclangPath);
     juce::String checkScript (const juce::String& script, const juce::String& sclangPath);
     juce::String readCheckResult (const juce::String& checkId) const;
@@ -95,6 +97,7 @@ private:
                                 double delaySeconds);
     void sendVolumeCommand (const juce::String& laneId, float volume);
     void sendMixCommand (const juce::String& laneId, float volume, float pan);
+    void sendMasterGainCommand (float gain);
     void sendStopCommand (const juce::String& laneId, double releaseSeconds);
     void sendStopAllCommand();
     void sendClearMachineCommand();
@@ -122,6 +125,7 @@ private:
     std::atomic<bool> logReaderShouldRun { false };
     std::thread logReader;
     juce::String currentStatus { "Audio offline" };
+    float masterGain = 1.0f;
     juce::OwnedArray<juce::File> tempScriptStorage;
     juce::HashMap<juce::String, juce::File*> tempScripts;
 };

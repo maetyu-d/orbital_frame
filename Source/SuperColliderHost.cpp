@@ -1,6 +1,7 @@
 #include "SuperColliderHost.h"
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <thread>
 
@@ -35,15 +36,23 @@ constexpr AudioProfile getAudioProfile()
         return { 0.028, 64, 0.006 };
 }
 
+std::atomic<int> tempScriptSerial { 0 };
+
 juce::File makeTempScript (const juce::String& laneKey, const juce::String& source)
 {
     auto safeKey = laneKey.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_");
+    if (safeKey.isEmpty())
+        safeKey = "lane";
+
     auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                   .getChildFile ("MarkovFSM")
+                   .getChildFile ("wf")
                    .getChildFile ("runtime")
                    .getChildFile ("lane-scripts");
     dir.createDirectory();
-    auto file = dir.getChildFile ("markov-fsm-" + safeKey + ".scd");
+
+    const auto unique = juce::String::toHexString (juce::Time::currentTimeMillis())
+                      + "-" + juce::String (++tempScriptSerial);
+    auto file = dir.getChildFile ("wf-" + safeKey + "-" + unique + ".scd");
     file.replaceWithText (source);
     return file;
 }
@@ -96,7 +105,7 @@ juce::String injectLaneMetering (juce::String source, const juce::String& laneId
     const auto originalLine = source.substring (expressionStart, expressionEnd);
     const auto trimmedLeft = originalLine.trimStart();
     const auto indent = originalLine.substring (0, originalLine.length() - trimmedLeft.length());
-    const auto meteredLine = indent + "~markovMetered.(" + scSymbolLiteral (laneId) + ", " + expression + ");";
+    const auto meteredLine = indent + "~wfMetered.(" + scSymbolLiteral (laneId) + ", " + expression + ");";
 
     return source.substring (0, expressionStart) + meteredLine + source.substring (expressionEnd + 1);
 }
@@ -216,7 +225,7 @@ juce::String shellQuote (juce::String value)
 juce::File runtimeDirectory()
 {
     auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                   .getChildFile ("MarkovFSM")
+                   .getChildFile ("wf")
                    .getChildFile ("runtime");
     dir.createDirectory();
     return dir;
@@ -303,7 +312,6 @@ int SuperColliderHost::prepareData(const LaneSnapshot& lane, const juce::String&
 
         if (auto* existing = tempScripts[lane.id])
         {
-            existing->deleteFile();
             tempScriptStorage.removeObject (existing, true);
             tempScripts.remove (lane.id);
         }
@@ -333,7 +341,6 @@ bool SuperColliderHost::freezeLane (Lane& lane, const juce::String& sclangPath, 
 
         if (auto* existing = tempScripts[liveSnapshot.id])
         {
-            existing->deleteFile();
             tempScriptStorage.removeObject (existing, true);
             tempScripts.remove (liveSnapshot.id);
         }
@@ -496,8 +503,34 @@ void SuperColliderHost::stopAll(MachineModel& model)
             sendStopAllCommand();
 
         markAllLanesStopped (model);
-        addLog ("Stopped all Markov lanes");
+        addLog ("Stopped all wf lanes");
         setStatus (bridgeProcess != nullptr && bridgeProcess->isRunning() ? "Audio ready" : "Audio offline");
+    }
+
+void SuperColliderHost::resetProjectState (const juce::String& sclangPath)
+    {
+        const juce::ScopedLock lock (hostLock);
+
+        if (! ensureBridgeRunningLocked (sclangPath))
+        {
+            setStatus ("Audio offline");
+            return;
+        }
+
+        if (commandDirectory.isDirectory())
+        {
+            juce::Array<juce::File> staleCommands;
+            commandDirectory.findChildFiles (staleCommands, juce::File::findFiles, false, "*.scd");
+            for (const auto& file : staleCommands)
+                file.deleteFile();
+        }
+
+        sendClearMachineCommand();
+        juce::Thread::sleep (35);
+        tempScripts.clear();
+        tempScriptStorage.clear();
+        addLog ("Audio project state reset");
+        setStatus ("Audio ready");
     }
 
 bool SuperColliderHost::isReady() const
@@ -536,10 +569,10 @@ void SuperColliderHost::panic(MachineModel& model)
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
         {
             if (oscConnected)
-                oscSender.send ("/markov/panic");
+                oscSender.send ("/wf/panic");
 
             if (shouldUseCommandFallback())
-                writeCommand ("~markovStopAll.();\n");
+                writeCommand ("~wfStopAll.();\n");
         }
 
         markAllLanesStopped (model);
@@ -558,7 +591,7 @@ void SuperColliderHost::configureMachine(const MachineModel& model)
             return;
         }
 
-        writeCommand ("~markovConfigureMachine.(" + machineAsSuperColliderEvent (model) + ");\n");
+        writeCommand ("~wfConfigureMachine.(" + machineAsSuperColliderEvent (model) + ");\n");
         addLog ("FSM prepared");
     }
 
@@ -569,7 +602,7 @@ void SuperColliderHost::runMachine(int startState, double rateHz)
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
         {
             const auto rate = juce::jlimit (0.05, 8.0, rateHz);
-            writeCommand ("~markovRunMachine.(" + juce::String (juce::jmax (0, startState))
+            writeCommand ("~wfRunMachine.(" + juce::String (juce::jmax (0, startState))
                           + ", " + scFloatLiteral (rate) + ");\n");
         }
     }
@@ -579,7 +612,7 @@ void SuperColliderHost::pauseMachine()
         const juce::ScopedLock lock (hostLock);
 
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
-            writeCommand ("~markovPauseMachine.();\n");
+            writeCommand ("~wfPauseMachine.();\n");
     }
 
 void SuperColliderHost::stepMachine()
@@ -587,7 +620,7 @@ void SuperColliderHost::stepMachine()
         const juce::ScopedLock lock (hostLock);
 
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
-            writeCommand ("~markovStepMachine.();\n");
+            writeCommand ("~wfStepMachine.();\n");
     }
 
 void SuperColliderHost::cancelExport()
@@ -612,16 +645,16 @@ void SuperColliderHost::testTone(const juce::String& sclangPath)
         appendRuntimeLog ("test tone requested");
         if (oscConnected)
         {
-            oscSender.send ("/markov/test");
+            oscSender.send ("/wf/test");
             juce::Timer::callAfterDelay (650, [this]
             {
                 const juce::ScopedLock retryLock (hostLock);
                 if (oscConnected)
-                    oscSender.send ("/markov/test");
+                    oscSender.send ("/wf/test");
             });
         }
         else
-            writeCommand ("~markovTest.();\n");
+            writeCommand ("~wfTest.();\n");
 
         addLog ("Test tone requested");
     }
@@ -682,6 +715,7 @@ bool SuperColliderHost::ensureBridgeRunningLocked(const juce::String& sclangPath
         appendRuntimeLog ("bridge started; log: " + bridgeLogFile.getFullPathName());
         bridgeLogReadPosition = 0;
         startLogReader();
+        sendMasterGainCommand (masterGain);
         return true;
     }
 
@@ -719,65 +753,72 @@ juce::String SuperColliderHost::makeBridgeScript() const
                + deviceLine
                + sampleRateLine +
                "s.options.hardwareBufferSize = " + bufferSize + ";\n"
+               "s.options.numInputBusChannels = 0;\n"
                "s.options.numOutputBusChannels = " + outputChannels + ";\n"
                "s.options.memSize = 262144;\n"
                "s.boot;\n"
-               "~markovFade = " + crossfade + ";\n"
-               "~markovAttack = " + attack + ";\n"
-               "~markovRelease = " + defaultRelease + ";\n"
-               "~markovServerReady = false;\n"
-               "~markovPending = List.new;\n"
-               "~markovWhenReady = { |func|\n"
-               "    if (~markovServerReady) {\n"
+               "~wfFade = " + crossfade + ";\n"
+               "~wfAttack = " + attack + ";\n"
+               "~wfRelease = " + defaultRelease + ";\n"
+               "~wfServerReady = false;\n"
+               "~wfPending = List.new;\n"
+               "~wfWhenReady = { |func|\n"
+               "    if (~wfServerReady) {\n"
                "        func.value;\n"
                "    } {\n"
-               "        ~markovPending.add(func);\n"
+               "        ~wfPending.add(func);\n"
                "        s.waitForBoot {\n"
-               "            ~markovServerReady = true;\n"
-               "            ~markovPending.do { |pending| pending.value };\n"
-               "            ~markovPending.clear;\n"
+               "            ~wfServerReady = true;\n"
+               "            ~wfPending.do { |pending| pending.value };\n"
+               "            ~wfPending.clear;\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~markovObjects = IdentityDictionary.new;\n"
-               "~markovStopTokens = IdentityDictionary.new;\n"
-               "~markovVolumes = IdentityDictionary.new;\n"
-               "~markovPans = IdentityDictionary.new;\n"
-               "~markovPrograms = IdentityDictionary.new;\n"
-               "~markovFrozenPaths = IdentityDictionary.new;\n"
-               "~markovFrozenBuffers = IdentityDictionary.new;\n"
-               "~markovFrozenBufferPaths = IdentityDictionary.new;\n"
-               "~markovLaneBuses = IdentityDictionary.new;\n"
-               "~markovLaneRouters = IdentityDictionary.new;\n"
-               "~markovMeterIds = IdentityDictionary.new;\n"
-               "~markovMeterKeys = IdentityDictionary.new;\n"
-               "~markovNextMeterId = 1;\n"
-               "~markovExportCancel = false;\n"
-               "~markovExporting = false;\n"
-               "~markovJuce = NetAddr(\"127.0.0.1\", 57142);\n"
-               "~markovLoad = { |key, path|\n"
+               "~wfObjects = IdentityDictionary.new;\n"
+               "~wfStopTokens = IdentityDictionary.new;\n"
+               "~wfVolumes = IdentityDictionary.new;\n"
+               "~wfPans = IdentityDictionary.new;\n"
+               "~wfPrograms = IdentityDictionary.new;\n"
+               "~wfFrozenPaths = IdentityDictionary.new;\n"
+               "~wfFrozenBuffers = IdentityDictionary.new;\n"
+               "~wfFrozenBufferPaths = IdentityDictionary.new;\n"
+               "~wfLaneBuses = IdentityDictionary.new;\n"
+               "~wfLaneRouters = IdentityDictionary.new;\n"
+               "~wfMeterIds = IdentityDictionary.new;\n"
+               "~wfMeterKeys = IdentityDictionary.new;\n"
+               "~wfNextMeterId = 1;\n"
+               "~wfExportCancel = false;\n"
+               "~wfExporting = false;\n"
+               "~wfMasterGain = 1.0;\n"
+               "~wfJuce = NetAddr(\"127.0.0.1\", 57142);\n"
+               "~markovTempoHz = 1.0;\n"
+               "~wfLoad = { |key, path|\n"
                "    var file, source;\n"
+               "    ~wfStop.(key, 0.025);\n"
+               "    ~wfPrograms.removeAt(key);\n"
+               "    ~wfFrozenPaths.removeAt(key);\n"
                "    file = File(path, \"r\");\n"
-               "    if (file.isOpen.not) { (\"Markov could not open lane: \" ++ path).warn; ^nil };\n"
+               "    if (file.isOpen.not) { (\"wf could not open lane: \" ++ path).warn; ^nil };\n"
                "    source = file.readAllString;\n"
                "    file.close;\n"
-               "    ~markovFrozenPaths.removeAt(key);\n"
-               "    ~markovPrograms[key] = (\"{ \" ++ source ++ \" }\").interpret;\n"
+               "    ~wfPrograms[key] = (\"{ \" ++ source ++ \" }\").interpret;\n"
                "};\n"
-               "~markovLoadFrozen = { |key, path|\n"
-               "    ~markovFrozenPaths[key] = path;\n"
+               "~wfLoadFrozen = { |key, path|\n"
+               "    ~wfStop.(key, 0.025);\n"
+               "    ~wfPrograms.removeAt(key);\n"
+               "    ~wfFrozenPaths[key] = path;\n"
                "};\n"
-               "~markovWriteCheckResult = { |resultPath, text|\n"
+               "~wfWriteCheckResult = { |resultPath, text|\n"
                "    var out = File(resultPath, \"w\");\n"
                "    if (out.isOpen) { out.write(text); out.close };\n"
                "};\n"
-               "~markovCheck = { |checkId, path, resultPath|\n"
+               "~wfCheck = { |checkId, path, resultPath|\n"
                "    var file, source;\n"
-               "    (\"MARKOV_CHECK_BEGIN \" ++ checkId).postln;\n"
+               "    (\"WF_CHECK_BEGIN \" ++ checkId).postln;\n"
                "    file = File(path, \"r\");\n"
                "    if (file.isOpen.not) {\n"
-               "        ~markovWriteCheckResult.(resultPath, \"ERROR could not open script file\");\n"
-               "        (\"MARKOV_CHECK_ERROR \" ++ checkId ++ \" could not open script file\").postln;\n"
+               "        ~wfWriteCheckResult.(resultPath, \"ERROR could not open script file\");\n"
+               "        (\"WF_CHECK_ERROR \" ++ checkId ++ \" could not open script file\").postln;\n"
                "        ^nil;\n"
                "    };\n"
                "    source = file.readAllString;\n"
@@ -785,116 +826,120 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    try {\n"
                "        var compiled = (\"{ \" ++ source ++ \" }\").compile;\n"
                "        if (compiled.isNil) {\n"
-               "            ~markovWriteCheckResult.(resultPath, \"ERROR compile failed\");\n"
-               "            (\"MARKOV_CHECK_ERROR \" ++ checkId ++ \" compile failed\").postln;\n"
+               "            ~wfWriteCheckResult.(resultPath, \"ERROR compile failed\");\n"
+               "            (\"WF_CHECK_ERROR \" ++ checkId ++ \" compile failed\").postln;\n"
                "        } {\n"
-               "            ~markovWriteCheckResult.(resultPath, \"OK\");\n"
-               "            (\"MARKOV_CHECK_OK \" ++ checkId).postln;\n"
+               "            ~wfWriteCheckResult.(resultPath, \"OK\");\n"
+               "            (\"WF_CHECK_OK \" ++ checkId).postln;\n"
                "        };\n"
                "    } { |error|\n"
-               "        ~markovWriteCheckResult.(resultPath, \"ERROR \" ++ error.errorString);\n"
-               "        (\"MARKOV_CHECK_ERROR \" ++ checkId ++ \" \" ++ error.errorString).postln;\n"
+               "        ~wfWriteCheckResult.(resultPath, \"ERROR \" ++ error.errorString);\n"
+               "        (\"WF_CHECK_ERROR \" ++ checkId ++ \" \" ++ error.errorString).postln;\n"
                "    };\n"
                "};\n"
-               "SynthDef(\\markovLaneRouter, { |bus = 0, replyId = 0|\n"
+               "SynthDef(\\wfLaneRouter, { |bus = 0, replyId = 0|\n"
                "    var sig = In.ar(bus, 2);\n"
                "    var mono = Mix(sig) * 0.5;\n"
                "    var meterTrig = Impulse.kr(30, 0) + Trig1.kr(1, ControlDur.ir);\n"
                "    var rms = Amplitude.kr(mono, 0.004, 0.055).clip(0, 1);\n"
                "    var peak = Peak.kr(mono.abs, meterTrig).clip(0, 1);\n"
-               "    SendReply.kr(meterTrig, '/markov/laneMeter', [rms, peak], replyId);\n"
+               "    SendReply.kr(meterTrig, '/wf/laneMeter', [rms, peak], replyId);\n"
                "    Out.ar(0, sig);\n"
                "}).add;\n"
-               "SynthDef(\\markovFrozenPlayer, { |buf = 0, gate = 1, fade = 0.006, markovVol = 1, markovPan = 0, replyId = 0|\n"
+               "SynthDef(\\wfFrozenPlayer, { |buf = 0, gate = 1, fade = 0.006, wfVol = 1, wfPan = 0, replyId = 0|\n"
                "    var sig = PlayBuf.ar(2, buf, BufRateScale.kr(buf), loop: 1);\n"
                "    var env = EnvGen.kr(Env.asr(fade.max(0.001), 1, fade.max(0.001)), gate, doneAction: 2);\n"
-               "    var controlled = Balance2.ar(sig[0], sig[1], Lag.kr(markovPan.clip(-1, 1), 0.02)) * env * Lag.kr(markovVol, 0.02);\n"
+               "    var controlled = Balance2.ar(sig[0], sig[1], Lag.kr(wfPan.clip(-1, 1), 0.02)) * env * Lag.kr(wfVol, 0.02);\n"
                "    var mono = Mix(controlled) * 0.5;\n"
                "    var meterTrig = Impulse.kr(30, 0) + Trig1.kr(1, ControlDur.ir);\n"
                "    var rms = Amplitude.kr(mono, 0.004, 0.055).clip(0, 1);\n"
                "    var peak = Peak.kr(mono.abs, meterTrig).clip(0, 1);\n"
-               "    SendReply.kr(meterTrig, '/markov/laneMeter', [rms, peak], replyId);\n"
+               "    SendReply.kr(meterTrig, '/wf/laneMeter', [rms, peak], replyId);\n"
                "    Out.ar(0, controlled);\n"
                "}).add;\n"
-               "OSCdef(\\markovLaneMeter, { |msg|\n"
-               "    var key = ~markovMeterKeys[msg[2].asInteger];\n"
-               "    if (key.notNil) { ~markovJuce.sendMsg('/markov/meter', key.asString, msg[3].asFloat, msg[4].asFloat) };\n"
-               "}, '/markov/laneMeter');\n"
-               "~markovMeterIdFor = { |key|\n"
-               "    var id = ~markovMeterIds[key];\n"
+               "OSCdef(\\wfLaneMeter, { |msg|\n"
+               "    var key = ~wfMeterKeys[msg[2].asInteger];\n"
+               "    if (key.notNil) { ~wfJuce.sendMsg('/wf/meter', key.asString, msg[3].asFloat, msg[4].asFloat) };\n"
+               "}, '/wf/laneMeter');\n"
+               "~wfMeterIdFor = { |key|\n"
+               "    var id = ~wfMeterIds[key];\n"
                "    if (id.isNil) {\n"
-               "        id = ~markovNextMeterId;\n"
-               "        ~markovNextMeterId = ~markovNextMeterId + 1;\n"
-               "        ~markovMeterIds[key] = id;\n"
-               "        ~markovMeterKeys[id] = key;\n"
+               "        id = ~wfNextMeterId;\n"
+               "        ~wfNextMeterId = ~wfNextMeterId + 1;\n"
+               "        ~wfMeterIds[key] = id;\n"
+               "        ~wfMeterKeys[id] = key;\n"
                "    };\n"
                "    id;\n"
                "};\n"
-               "~markovMetered = { |key, sig|\n"
+               "~wfMetered = { |key, sig|\n"
                "    var stereo = sig.asArray;\n"
-               "    var pan = Lag.kr(\\markovPan.kr(~markovPans[key] ? 0), 0.02).clip(-1, 1);\n"
+               "    var pan = Lag.kr(\\wfPan.kr(~wfPans[key] ? 0), 0.02).clip(-1, 1);\n"
                "    var controlled;\n"
                "    stereo = if (stereo.size < 2, { [stereo[0], stereo[0]] }, { [stereo[0], stereo[1]] });\n"
-               "    controlled = Balance2.ar(stereo[0], stereo[1], pan) * Lag.kr(\\markovVol.kr(~markovVolumes[key] ? 1), 0.02);\n"
-               "    Out.ar(~markovLaneBusFor.(key), controlled);\n"
+               "    controlled = Balance2.ar(stereo[0], stereo[1], pan) * Lag.kr(\\wfVol.kr(~wfVolumes[key] ? 1), 0.02);\n"
+               "    Out.ar(~wfLaneBusFor.(key), controlled);\n"
                "    Silent.ar(2);\n"
                "};\n"
-               "~markovStartLaneRouter = { |key, bus|\n"
-               "    var router = ~markovLaneRouters[key];\n"
-               "    var target = ~markovMaster ? s;\n"
+               "~wfStartLaneRouter = { |key, bus|\n"
+               "    var router = ~wfLaneRouters[key];\n"
+               "    var target = ~wfMaster ? s;\n"
                "    if (router.notNil) { router.free };\n"
-               "    ~markovLaneRouters[key] = Synth(\\markovLaneRouter,\n"
-               "        [\\bus, bus, \\replyId, ~markovMeterIdFor.(key)],\n"
+               "    ~wfLaneRouters[key] = Synth(\\wfLaneRouter,\n"
+               "        [\\bus, bus, \\replyId, ~wfMeterIdFor.(key)],\n"
                "        target: target,\n"
-               "        addAction: if (~markovMaster.notNil, { \\addBefore }, { \\addToTail }));\n"
+               "        addAction: if (~wfMaster.notNil, { \\addBefore }, { \\addToTail }));\n"
                "};\n"
-               "~markovLaneBusFor = { |key|\n"
-               "    var bus = ~markovLaneBuses[key];\n"
+               "~wfLaneBusFor = { |key|\n"
+               "    var bus = ~wfLaneBuses[key];\n"
                "    if (bus.isNil) {\n"
                "        bus = Bus.audio(s, 2);\n"
-               "        ~markovLaneBuses[key] = bus;\n"
-               "        ~markovStartLaneRouter.(key, bus);\n"
+               "        ~wfLaneBuses[key] = bus;\n"
+               "        ~wfStartLaneRouter.(key, bus);\n"
                "    };\n"
                "    bus;\n"
                "};\n"
-               "~markovStartMaster = {\n"
-               "    if (~markovMaster.notNil) { ~markovMaster.free };\n"
-               "    ~markovMaster = {\n"
+               "~wfStartMaster = {\n"
+               "    if (~wfMaster.notNil) { ~wfMaster.free };\n"
+               "    ~wfMaster = { |wfMasterGain = 1|\n"
                "        var in = In.ar(0, 2);\n"
                "        var low = HPF.ar(LeakDC.ar(in), 30);\n"
                "        var controlled = Compander.ar(low * 0.95, low, 0.24, 1, 0.30, 0.004, 0.20);\n"
-               "        ReplaceOut.ar(0, Limiter.ar(controlled.tanh * 0.78, 0.58, 0.018));\n"
-               "    }.play(s, addAction: \\addToTail);\n"
+               "        ReplaceOut.ar(0, Limiter.ar(controlled.tanh * 0.78 * Lag.kr(wfMasterGain.clip(0, 5), 0.035), 0.92, 0.018));\n"
+               "    }.play(s, addAction: \\addToTail, args: [\\wfMasterGain, ~wfMasterGain]);\n"
                "};\n"
-               "~markovSetVolume = { |key, volume|\n"
+               "~wfSetMasterGain = { |gain|\n"
+               "    ~wfMasterGain = gain.clip(0, 5);\n"
+               "    if (~wfMaster.notNil) { ~wfMaster.set(\\wfMasterGain, ~wfMasterGain) };\n"
+               "};\n"
+               "~wfSetVolume = { |key, volume|\n"
                "    var obj;\n"
                "    volume = volume.clip(0, 2);\n"
-               "    ~markovVolumes[key] = volume;\n"
-               "    obj = ~markovObjects[key];\n"
-               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\markovVol, volume) };\n"
+               "    ~wfVolumes[key] = volume;\n"
+               "    obj = ~wfObjects[key];\n"
+               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\wfVol, volume) };\n"
                "};\n"
-               "~markovSetMix = { |key, volume, pan|\n"
+               "~wfSetMix = { |key, volume, pan|\n"
                "    var obj;\n"
                "    volume = volume.clip(0, 2);\n"
                "    pan = pan.clip(-1, 1);\n"
-               "    ~markovVolumes[key] = volume;\n"
-               "    ~markovPans[key] = pan;\n"
-               "    obj = ~markovObjects[key];\n"
-               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\markovVol, volume, \\markovPan, pan) };\n"
+               "    ~wfVolumes[key] = volume;\n"
+               "    ~wfPans[key] = pan;\n"
+               "    obj = ~wfObjects[key];\n"
+               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\wfVol, volume, \\wfPan, pan) };\n"
                "};\n"
-               "~markovStop = { |key, release|\n"
-               "    var obj = ~markovObjects[key];\n"
+               "~wfStop = { |key, release|\n"
+               "    var obj = ~wfObjects[key];\n"
                "    var token;\n"
-               "    release = release ? ~markovRelease;\n"
+               "    release = release ? ~wfRelease;\n"
                "    if (obj.notNil) {\n"
                "        if (obj.respondsTo(\\set)) {\n"
-               "            token = (~markovStopTokens[key] ? 0) + 1;\n"
-               "            ~markovStopTokens[key] = token;\n"
+               "            token = (~wfStopTokens[key] ? 0) + 1;\n"
+               "            ~wfStopTokens[key] = token;\n"
                "            obj.set(\\gate, 0, \\fade, release);\n"
                "            SystemClock.sched(release + 0.12, {\n"
-               "                if ((~markovObjects[key] === obj) and: { ~markovStopTokens[key] == token }) {\n"
-               "                    ~markovObjects.removeAt(key);\n"
-               "                    ~markovStopTokens.removeAt(key);\n"
+               "                if ((~wfObjects[key] === obj) and: { ~wfStopTokens[key] == token }) {\n"
+               "                    ~wfObjects.removeAt(key);\n"
+               "                    ~wfStopTokens.removeAt(key);\n"
                "                };\n"
                "                nil;\n"
                "            });\n"
@@ -902,44 +947,55 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "            if (obj.respondsTo(\\run)) { obj.run(false) } {\n"
                "                if (obj.respondsTo(\\stop)) { obj.stop };\n"
                "            };\n"
-               "            ~markovObjects.removeAt(key);\n"
+               "            ~wfObjects.removeAt(key);\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~markovStopAll = {\n"
-               "    if (~markovPauseMachine.notNil) { ~markovPauseMachine.() };\n"
-               "    ~markovObjects.keys.copy.do { |key| ~markovStop.(key, 0.025) };\n"
+               "~wfStopAll = {\n"
+               "    if (~wfPauseMachine.notNil) { ~wfPauseMachine.() };\n"
+               "    ~wfObjects.keys.copy.do { |key| ~wfStop.(key, 0.025) };\n"
                "};\n"
-               "~markovPanic = {\n"
+               "~wfClearMachine = {\n"
+               "    if (~wfPauseMachine.notNil) { ~wfPauseMachine.() };\n"
+               "    ~wfObjects.keys.copy.do { |key| ~wfStop.(key, 0.025) };\n"
+               "    ~wfPrograms = IdentityDictionary.new;\n"
+               "    ~wfFrozenPaths = IdentityDictionary.new;\n"
+               "    ~wfVolumes = IdentityDictionary.new;\n"
+               "    ~wfPans = IdentityDictionary.new;\n"
+               "    ~wfConfiguredMachine = nil;\n"
+               "    ~wfMachineTokens.keysValuesDo { |key, token| ~wfMachineTokens[key] = token + 1 };\n"
+               "    \"WF_PROJECT_CLEARED\".postln;\n"
+               "};\n"
+               "~wfPanic = {\n"
                "    s.freeAll;\n"
-               "    ~markovObjects = IdentityDictionary.new;\n"
-               "    ~markovStopTokens = IdentityDictionary.new;\n"
-               "    ~markovVolumes = IdentityDictionary.new;\n"
-               "    ~markovPans = IdentityDictionary.new;\n"
-               "    ~markovFrozenPaths = IdentityDictionary.new;\n"
-               "    ~markovFrozenBuffers = IdentityDictionary.new;\n"
-               "    ~markovFrozenBufferPaths = IdentityDictionary.new;\n"
-               "    ~markovLaneBuses = IdentityDictionary.new;\n"
-               "    ~markovLaneRouters = IdentityDictionary.new;\n"
-               "    ~markovMeterIds = IdentityDictionary.new;\n"
-               "    ~markovMeterKeys = IdentityDictionary.new;\n"
-               "    ~markovNextMeterId = 1;\n"
-               "    SystemClock.sched(0.05, { ~markovStartMaster.(); nil });\n"
+               "    ~wfObjects = IdentityDictionary.new;\n"
+               "    ~wfStopTokens = IdentityDictionary.new;\n"
+               "    ~wfVolumes = IdentityDictionary.new;\n"
+               "    ~wfPans = IdentityDictionary.new;\n"
+               "    ~wfFrozenPaths = IdentityDictionary.new;\n"
+               "    ~wfFrozenBuffers = IdentityDictionary.new;\n"
+               "    ~wfFrozenBufferPaths = IdentityDictionary.new;\n"
+               "    ~wfLaneBuses = IdentityDictionary.new;\n"
+               "    ~wfLaneRouters = IdentityDictionary.new;\n"
+               "    ~wfMeterIds = IdentityDictionary.new;\n"
+               "    ~wfMeterKeys = IdentityDictionary.new;\n"
+               "    ~wfNextMeterId = 1;\n"
+               "    SystemClock.sched(0.05, { ~wfStartMaster.(); nil });\n"
                "};\n"
-               "~markovWhenReady.({ ~markovStartMaster.(); });\n"
-               "~markovPlayFrozen = { |key, path|\n"
-               "    var buf = ~markovFrozenBuffers[key];\n"
-               "    var oldPath = ~markovFrozenBufferPaths[key];\n"
+               "~wfWhenReady.({ ~wfStartMaster.(); });\n"
+               "~wfPlayFrozen = { |key, path|\n"
+               "    var buf = ~wfFrozenBuffers[key];\n"
+               "    var oldPath = ~wfFrozenBufferPaths[key];\n"
                "    var makeSynth = { |loaded|\n"
-               "        var synth = Synth(\\markovFrozenPlayer, [\\buf, loaded, \\gate, 1, \\fade, ~markovAttack, \\markovVol, ~markovVolumes[key] ? 1, \\markovPan, ~markovPans[key] ? 0, \\replyId, ~markovMeterIdFor.(key)]);\n"
-               "        ~markovObjects[key] = synth;\n"
+               "        var synth = Synth(\\wfFrozenPlayer, [\\buf, loaded, \\gate, 1, \\fade, ~wfAttack, \\wfVol, ~wfVolumes[key] ? 1, \\wfPan, ~wfPans[key] ? 0, \\replyId, ~wfMeterIdFor.(key)]);\n"
+               "        ~wfObjects[key] = synth;\n"
                "        synth;\n"
                "    };\n"
                "    if (buf.isNil or: { oldPath != path }) {\n"
                "        if (buf.notNil) { buf.free };\n"
-               "        ~markovFrozenBufferPaths[key] = path;\n"
+               "        ~wfFrozenBufferPaths[key] = path;\n"
                "        Buffer.read(s, path, action: { |loaded|\n"
-               "            ~markovFrozenBuffers[key] = loaded;\n"
+               "            ~wfFrozenBuffers[key] = loaded;\n"
                "            makeSynth.(loaded);\n"
                "        });\n"
                "        nil;\n"
@@ -947,148 +1003,149 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "        makeSynth.(buf);\n"
                "    };\n"
                "};\n"
-               "~markovPlay = { |key|\n"
-               "    ~markovWhenReady.({\n"
-               "        var obj = ~markovObjects[key];\n"
-               "        var program = ~markovPrograms[key];\n"
-               "        var frozenPath = ~markovFrozenPaths[key];\n"
+               "~wfPlay = { |key|\n"
+               "    ~wfWhenReady.({\n"
+               "        var obj = ~wfObjects[key];\n"
+               "        var program = ~wfPrograms[key];\n"
+               "        var frozenPath = ~wfFrozenPaths[key];\n"
                "        if (obj.notNil) {\n"
-               "            ~markovStopTokens.removeAt(key);\n"
-               "            if (obj.respondsTo(\\set)) { obj.set(\\gate, 1, \\fade, ~markovAttack, \\markovVol, ~markovVolumes[key] ? 1, \\markovPan, ~markovPans[key] ? 0) };\n"
+               "            ~wfStopTokens.removeAt(key);\n"
+               "            if (obj.respondsTo(\\set)) { obj.set(\\gate, 1, \\fade, ~wfAttack, \\wfVol, ~wfVolumes[key] ? 1, \\wfPan, ~wfPans[key] ? 0) };\n"
                "        } {\n"
                "            if (frozenPath.notNil) {\n"
-               "                ~markovStopTokens.removeAt(key);\n"
-               "                obj = ~markovPlayFrozen.(key, frozenPath);\n"
-               "                if (obj.notNil) { ~markovObjects[key] = obj };\n"
+               "                ~wfStopTokens.removeAt(key);\n"
+               "                obj = ~wfPlayFrozen.(key, frozenPath);\n"
+               "                if (obj.notNil) { ~wfObjects[key] = obj };\n"
                "            } { if (program.notNil) {\n"
-               "                ~markovStopTokens.removeAt(key);\n"
+               "                ~wfStopTokens.removeAt(key);\n"
                "                obj = program.value;\n"
-               "                ~markovObjects[key] = obj;\n"
+               "                ~wfObjects[key] = obj;\n"
                "            } };\n"
                "        };\n"
                "    });\n"
                "};\n"
-               "~markovFreeze = { |key, path, duration = 4|\n"
-               "    ~markovWhenReady.({\n"
+               "~wfFreeze = { |key, path, duration = 4|\n"
+               "    ~wfWhenReady.({\n"
                "        Routine({\n"
-               "            var program = ~markovPrograms[key];\n"
+               "            var program = ~wfPrograms[key];\n"
                "            var obj, recBuf, recSynth;\n"
                "            duration = duration.clip(0.25, 64);\n"
-               "            if (program.isNil) { (\"MARKOV_FREEZE_ERROR \" ++ key ++ \" no program\").warn; ^nil };\n"
-               "            ~markovStop.(key, 0.02);\n"
+               "            if (program.isNil) { (\"WF_FREEZE_ERROR \" ++ key ++ \" no program\").warn; ^nil };\n"
+               "            ~wfStop.(key, 0.02);\n"
                "            recBuf = Buffer.alloc(s, (s.sampleRate * duration).asInteger.max(1024), 2);\n"
                "            s.sync;\n"
-               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, ~markovLaneBusFor.(key)]);\n"
+               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, ~wfLaneBusFor.(key)]);\n"
                "            s.sync;\n"
                "            obj = program.value;\n"
-               "            ~markovObjects[key] = obj;\n"
+               "            ~wfObjects[key] = obj;\n"
                "            duration.wait;\n"
-               "            ~markovStop.(key, 0.05);\n"
+               "            ~wfStop.(key, 0.05);\n"
                "            s.sync;\n"
                "            recBuf.write(path, \"wav\", \"float\", -1, 0, false);\n"
                "            s.sync;\n"
                "            recBuf.free;\n"
-               "            ~markovFrozenPaths[key] = path;\n"
-               "            ~markovJuce.sendMsg('/markov/frozen', key.asString, path);\n"
-               "            (\"MARKOV_FREEZE_DONE \" ++ key ++ \" \" ++ path).postln;\n"
+               "            ~wfFrozenPaths[key] = path;\n"
+               "            ~wfJuce.sendMsg('/wf/frozen', key.asString, path);\n"
+               "            (\"WF_FREEZE_DONE \" ++ key ++ \" \" ++ path).postln;\n"
                "        }).play(SystemClock);\n"
                "    });\n"
                "};\n"
-               "~markovExport = { |path, duration = 32, rate = 1, startState = 0, sampleFormat = \"int16\"|\n"
-               "    ~markovWhenReady.({\n"
+               "~wfExport = { |path, duration = 32, rate = 1, startState = 0, sampleFormat = \"int16\"|\n"
+               "    ~wfWhenReady.({\n"
                "        Routine({\n"
                "            var recBuf, recSynth, elapsed;\n"
-               "            if (~markovConfiguredMachine.isNil) {\n"
-               "                \"MARKOV_EXPORT_ERROR no configured machine\".warn;\n"
-               "                ~markovJuce.sendMsg('/markov/exported', path, 0);\n"
+               "            if (~wfConfiguredMachine.isNil) {\n"
+               "                \"WF_EXPORT_ERROR no configured machine\".warn;\n"
+               "                ~wfJuce.sendMsg('/wf/exported', path, 0);\n"
                "                ^nil;\n"
                "            };\n"
-               "            if (~markovExporting) {\n"
-               "                \"MARKOV_EXPORT_ERROR already exporting\".warn;\n"
-               "                ~markovJuce.sendMsg('/markov/exported', path, 0);\n"
+               "            if (~wfExporting) {\n"
+               "                \"WF_EXPORT_ERROR already exporting\".warn;\n"
+               "                ~wfJuce.sendMsg('/wf/exported', path, 0);\n"
                "                ^nil;\n"
                "            };\n"
                "            duration = duration.clip(1, 1800);\n"
                "            rate = rate.max(0.05);\n"
                "            sampleFormat = if ([\"int16\", \"int24\", \"float\"].includes(sampleFormat).not, { \"int16\" }, { sampleFormat });\n"
-               "            ~markovExportCancel = false;\n"
-               "            ~markovExporting = true;\n"
-               "            (\"MARKOV_EXPORT_START \" ++ path ++ \" duration=\" ++ duration ++ \" format=\" ++ sampleFormat).postln;\n"
-               "            ~markovPauseMachine.();\n"
+               "            ~wfExportCancel = false;\n"
+               "            ~wfExporting = true;\n"
+               "            (\"WF_EXPORT_START \" ++ path ++ \" duration=\" ++ duration ++ \" format=\" ++ sampleFormat).postln;\n"
+               "            ~wfPauseMachine.();\n"
                "            recBuf = Buffer.alloc(s, 65536, 2);\n"
                "            s.sync;\n"
                "            recBuf.write(path, \"wav\", sampleFormat, 0, 0, true);\n"
                "            s.sync;\n"
                "            recSynth = { |buf| DiskOut.ar(buf, In.ar(0, 2)); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf]);\n"
                "            s.sync;\n"
-               "            ~markovRunMachine.(startState.asInteger, rate);\n"
+               "            ~wfRunMachine.(startState.asInteger, rate);\n"
                "            elapsed = 0.0;\n"
-               "            while { (elapsed < duration) and: { ~markovExportCancel.not } } {\n"
-               "                ~markovJuce.sendMsg('/markov/exportProgress', path, elapsed.min(duration), duration);\n"
+               "            while { (elapsed < duration) and: { ~wfExportCancel.not } } {\n"
+               "                ~wfJuce.sendMsg('/wf/exportProgress', path, elapsed.min(duration), duration);\n"
                "                0.25.wait;\n"
                "                elapsed = elapsed + 0.25;\n"
                "            };\n"
-               "            if (~markovExportCancel.not) { ~markovJuce.sendMsg('/markov/exportProgress', path, duration, duration); };\n"
-               "            ~markovPauseMachine.();\n"
-               "            ~markovStopAll.();\n"
+               "            if (~wfExportCancel.not) { ~wfJuce.sendMsg('/wf/exportProgress', path, duration, duration); };\n"
+               "            ~wfPauseMachine.();\n"
+               "            ~wfStopAll.();\n"
                "            s.sync;\n"
                "            if (recSynth.notNil) { recSynth.free };\n"
                "            s.sync;\n"
-               "            if (~markovExportCancel) {\n"
+               "            if (~wfExportCancel) {\n"
                "                recBuf.close;\n"
                "                s.sync;\n"
                "                recBuf.free;\n"
-               "                ~markovExporting = false;\n"
-               "                ~markovJuce.sendMsg('/markov/exported', path, -1);\n"
-               "                (\"MARKOV_EXPORT_CANCELLED \" ++ path).postln;\n"
+               "                ~wfExporting = false;\n"
+               "                ~wfJuce.sendMsg('/wf/exported', path, -1);\n"
+               "                (\"WF_EXPORT_CANCELLED \" ++ path).postln;\n"
                "                ^nil;\n"
                "            };\n"
                "            recBuf.close;\n"
                "            s.sync;\n"
                "            recBuf.free;\n"
-               "            ~markovExporting = false;\n"
-               "            ~markovJuce.sendMsg('/markov/exported', path, 1);\n"
-               "            (\"MARKOV_EXPORT_DONE \" ++ path).postln;\n"
+               "            ~wfExporting = false;\n"
+               "            ~wfJuce.sendMsg('/wf/exported', path, 1);\n"
+               "            (\"WF_EXPORT_DONE \" ++ path).postln;\n"
                "        }).play(SystemClock);\n"
                "    });\n"
                "};\n"
-               "~markovCancelExport = { ~markovExportCancel = true; };\n"
-               "~markovTransition = { |stopKeys, playKeys, release, delay = 0|\n"
-               "    ~markovWhenReady.({\n"
+               "~wfCancelExport = { ~wfExportCancel = true; };\n"
+               "~wfTransition = { |stopKeys, playKeys, release, delay = 0|\n"
+               "    ~wfWhenReady.({\n"
                "        var requestedAt = Main.elapsedTime;\n"
                "        var action;\n"
-               "        (\"MARKOV_TRANSITION_REQUEST delayMs=\" ++ (delay.max(0) * 1000).round(0.001) ++ \" stop=\" ++ stopKeys.size ++ \" play=\" ++ playKeys.size).postln;\n"
+               "        (\"WF_TRANSITION_REQUEST delayMs=\" ++ (delay.max(0) * 1000).round(0.001) ++ \" stop=\" ++ stopKeys.size ++ \" play=\" ++ playKeys.size).postln;\n"
                "        action = {\n"
-               "            (\"MARKOV_TRANSITION_EXEC actualMs=\" ++ ((Main.elapsedTime - requestedAt) * 1000).round(0.001)).postln;\n"
+               "            (\"WF_TRANSITION_EXEC actualMs=\" ++ ((Main.elapsedTime - requestedAt) * 1000).round(0.001)).postln;\n"
                "            s.bind {\n"
-               "                stopKeys.do { |key| if (playKeys.includes(key).not) { ~markovStop.(key, release) } };\n"
-               "                playKeys.do { |key| ~markovPlay.(key) };\n"
+               "                stopKeys.do { |key| if (playKeys.includes(key).not) { ~wfStop.(key, release) } };\n"
+               "                playKeys.do { |key| ~wfPlay.(key) };\n"
                "            };\n"
                "        };\n"
                "        if (delay <= 0) { action.value } { SystemClock.sched(delay.max(0), { action.value; nil }) };\n"
                "    });\n"
                "};\n"
-               "~markovSetMachineTiming = { |machine|\n"
+               "~wfSetMachineTiming = { |machine|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
                "    var bpm = (state[\\bpm] ? 104).clip(20, 320);\n"
-               "    ~markovTempoHz = bpm / 60;\n"
-               "    ~markovMachineClock.tempo = ~markovTempoHz.max(0.05);\n"
-               "    (\"MARKOV_TIMING bpm=\" ++ bpm.round(0.001) ++ \" rate=\" ++ (~markovRate ? 1.0).round(0.001) ++ \" hz=\" ++ ~markovTempoHz.round(0.001)).postln;\n"
+               "    ~wfTempoHz = bpm / 60;\n"
+               "    ~markovTempoHz = ~wfTempoHz;\n"
+               "    ~wfMachineClock.tempo = ~wfTempoHz.max(0.05);\n"
+               "    (\"WF_TIMING bpm=\" ++ bpm.round(0.001) ++ \" rate=\" ++ (~wfRate ? 1.0).round(0.001) ++ \" hz=\" ++ ~wfTempoHz.round(0.001)).postln;\n"
                "    nil;\n"
                "};\n"
-               "~markovConfiguredMachine = nil;\n"
-               "~markovRootTask = nil;\n"
-               "~markovMachineTokens = IdentityDictionary.new;\n"
-               "~markovRate = 1.0;\n"
-               "~markovMachineClock = TempoClock.new(1.0);\n"
-               "~markovRulesForState = { |machine, index|\n"
+               "~wfConfiguredMachine = nil;\n"
+               "~wfRootTask = nil;\n"
+               "~wfMachineTokens = IdentityDictionary.new;\n"
+               "~wfRate = 1.0;\n"
+               "~wfMachineClock = TempoClock.new(1.0);\n"
+               "~wfRulesForState = { |machine, index|\n"
                "    var state = machine[\\states][index];\n"
                "    var rules = state[\\rules] ? [];\n"
                "    if (rules.isEmpty) { [[(index + 1) % machine[\\states].size, 1.0]] } { rules };\n"
                "};\n"
-               "~markovChooseNextState = { |machine|\n"
-               "    var rules = ~markovRulesForState.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
+               "~wfChooseNextState = { |machine|\n"
+               "    var rules = ~wfRulesForState.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
                "    var total = rules.inject(0.0, { |sum, rule| sum + rule[1].max(0) });\n"
                "    var pick;\n"
                "    var chosen = rules[0][0];\n"
@@ -1103,29 +1160,29 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    chosen;\n"
                "};\n"
-               "~markovStateLanes = { |machine, index| machine[\\states][index][\\lanes] ? [] };\n"
-               "~markovActiveMachineLanes = { |machine|\n"
-               "    var keys = ~markovStateLanes.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
+               "~wfStateLanes = { |machine, index| machine[\\states][index][\\lanes] ? [] };\n"
+               "~wfActiveMachineLanes = { |machine|\n"
+               "    var keys = ~wfStateLanes.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
                "    machine[\\states].do { |state|\n"
-               "        if (state[\\child].notNil) { keys = keys ++ ~markovActiveMachineLanes.(state[\\child]) };\n"
+               "        if (state[\\child].notNil) { keys = keys ++ ~wfActiveMachineLanes.(state[\\child]) };\n"
                "    };\n"
                "    keys;\n"
                "};\n"
-               "~markovInvalidateMachineRecursive = { |machine|\n"
-               "    ~markovMachineTokens[machine[\\id]] = (~markovMachineTokens[machine[\\id]] ? 0) + 1;\n"
-               "    machine[\\states].do { |state| if (state[\\child].notNil) { ~markovInvalidateMachineRecursive.(state[\\child]) } };\n"
+               "~wfInvalidateMachineRecursive = { |machine|\n"
+               "    ~wfMachineTokens[machine[\\id]] = (~wfMachineTokens[machine[\\id]] ? 0) + 1;\n"
+               "    machine[\\states].do { |state| if (state[\\child].notNil) { ~wfInvalidateMachineRecursive.(state[\\child]) } };\n"
                "};\n"
-               "~markovStopMachineRecursive = { |machine|\n"
-               "    ~markovInvalidateMachineRecursive.(machine);\n"
-               "    ~markovActiveMachineLanes.(machine).do { |key| ~markovStop.(key, ~markovRelease) };\n"
+               "~wfStopMachineRecursive = { |machine|\n"
+               "    ~wfInvalidateMachineRecursive.(machine);\n"
+               "    ~wfActiveMachineLanes.(machine).do { |key| ~wfStop.(key, ~wfRelease) };\n"
                "};\n"
-               "~markovArmChildMachine = { |machine|\n"
+               "~wfArmChildMachine = { |machine|\n"
                "    machine[\\selected] = machine[\\entry] ? 0;\n"
-               "    (\"MARKOV_STATE \" ++ machine[\\id] ++ \" \" ++ machine[\\selected]).postln;\n"
-               "    ~markovJuce.sendMsg('/markov/state', machine[\\id], machine[\\selected]);\n"
-               "    ~markovStateLanes.(machine, machine[\\selected]);\n"
+               "    (\"WF_STATE \" ++ machine[\\id] ++ \" \" ++ machine[\\selected]).postln;\n"
+               "    ~wfJuce.sendMsg('/wf/state', machine[\\id], machine[\\selected]);\n"
+               "    ~wfStateLanes.(machine, machine[\\selected]);\n"
                "};\n"
-               "~markovEnterMachineState = { |machine, next, force = false|\n"
+               "~wfEnterMachineState = { |machine, next, force = false|\n"
                "    var previous = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var changing = previous != next;\n"
                "    var stopKeys = [];\n"
@@ -1134,75 +1191,75 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var nextChild;\n"
                "    if (changing.not and: { force.not }) { ^nil };\n"
                "    if (changing) {\n"
-               "        stopKeys = stopKeys ++ ~markovStateLanes.(machine, previous);\n"
+               "        stopKeys = stopKeys ++ ~wfStateLanes.(machine, previous);\n"
                "        previousChild = machine[\\states][previous][\\child];\n"
                "        if (previousChild.notNil and: { previousChild[\\timing] != \\latch }) {\n"
-               "            stopKeys = stopKeys ++ ~markovActiveMachineLanes.(previousChild);\n"
-               "            ~markovInvalidateMachineRecursive.(previousChild);\n"
+               "            stopKeys = stopKeys ++ ~wfActiveMachineLanes.(previousChild);\n"
+               "            ~wfInvalidateMachineRecursive.(previousChild);\n"
                "        };\n"
                "    };\n"
                "    machine[\\selected] = next;\n"
-               "    ~markovSetMachineTiming.(machine);\n"
-               "    (\"MARKOV_STATE \" ++ machine[\\id] ++ \" \" ++ next).postln;\n"
-               "    ~markovJuce.sendMsg('/markov/state', machine[\\id], next);\n"
-               "    playKeys = ~markovStateLanes.(machine, next);\n"
+               "    ~wfSetMachineTiming.(machine);\n"
+               "    (\"WF_STATE \" ++ machine[\\id] ++ \" \" ++ next).postln;\n"
+               "    ~wfJuce.sendMsg('/wf/state', machine[\\id], next);\n"
+               "    playKeys = ~wfStateLanes.(machine, next);\n"
                "    nextChild = machine[\\states][next][\\child];\n"
-               "    if (nextChild.notNil) { playKeys = playKeys ++ ~markovArmChildMachine.(nextChild) };\n"
-               "    ~markovTransition.(stopKeys, playKeys, ~markovRelease, 0);\n"
+               "    if (nextChild.notNil) { playKeys = playKeys ++ ~wfArmChildMachine.(nextChild) };\n"
+               "    ~wfTransition.(stopKeys, playKeys, ~wfRelease, 0);\n"
                "    nil;\n"
                "};\n"
-               "~markovAdvanceMachine = { |machine|\n"
-               "    var next = ~markovChooseNextState.(machine);\n"
-               "    ~markovEnterMachineState.(machine, next, false);\n"
+               "~wfAdvanceMachine = { |machine|\n"
+               "    var next = ~wfChooseNextState.(machine);\n"
+               "    ~wfEnterMachineState.(machine, next, false);\n"
                "    nil;\n"
                "};\n"
-               "~markovMachineDuration = { |machine|\n"
+               "~wfMachineDuration = { |machine|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
-               "    ((state[\\clockBeats] ? 4) / (~markovRate ? 1.0).max(0.05)).max(0.25);\n"
+               "    ((state[\\clockBeats] ? 4) / (~wfRate ? 1.0).max(0.05)).max(0.25);\n"
                "};\n"
-               "~markovSendPulse = { |machine, beatIndex = 0, beatCount = 1|\n"
+               "~wfSendPulse = { |machine, beatIndex = 0, beatCount = 1|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var count = beatCount.max(1).asInteger;\n"
                "    var beat = beatIndex.clip(0, count - 1).asInteger;\n"
                "    var phase = beat / count;\n"
-               "    ~markovJuce.sendMsg('/markov/pulse', machine[\\id], selected, phase, beat, count);\n"
+               "    ~wfJuce.sendMsg('/wf/pulse', machine[\\id], selected, phase, beat, count);\n"
                "};\n"
-               "~markovSchedulePulses = { |machine, token|\n"
-               "    var duration = ~markovMachineDuration.(machine);\n"
+               "~wfSchedulePulses = { |machine, token|\n"
+               "    var duration = ~wfMachineDuration.(machine);\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
                "    var beatCount = (state[\\clockBeats] ? 4).ceil.asInteger.max(1).min(32);\n"
                "    var interval = (duration / beatCount).max(0.05);\n"
-               "    ~markovSendPulse.(machine, 0, beatCount);\n"
+               "    ~wfSendPulse.(machine, 0, beatCount);\n"
                "    beatCount.do { |beat|\n"
                "        if (beat > 0) {\n"
-               "            ~markovMachineClock.sched(interval * beat, {\n"
-               "                if (~markovMachineTokens[machine[\\id]] == token) { ~markovSendPulse.(machine, beat, beatCount) };\n"
+               "            ~wfMachineClock.sched(interval * beat, {\n"
+               "                if (~wfMachineTokens[machine[\\id]] == token) { ~wfSendPulse.(machine, beat, beatCount) };\n"
                "                nil;\n"
                "            });\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~markovStartMachineTask = { |machine|\n"
-               "    var token = (~markovMachineTokens[machine[\\id]] ? 0) + 1;\n"
+               "~wfStartMachineTask = { |machine|\n"
+               "    var token = (~wfMachineTokens[machine[\\id]] ? 0) + 1;\n"
                "    var scheduleNext;\n"
-               "    ~markovMachineTokens[machine[\\id]] = token;\n"
+               "    ~wfMachineTokens[machine[\\id]] = token;\n"
                "    scheduleNext = {\n"
                "        var duration;\n"
                "        var durationSeconds;\n"
                "        var from;\n"
                "        var next;\n"
-               "        ~markovSetMachineTiming.(machine);\n"
-               "        ~markovSchedulePulses.(machine, token);\n"
-               "        duration = ~markovMachineDuration.(machine);\n"
-               "        durationSeconds = duration / (~markovMachineClock.tempo ? 1.0).max(0.05);\n"
+               "        ~wfSetMachineTiming.(machine);\n"
+               "        ~wfSchedulePulses.(machine, token);\n"
+               "        duration = ~wfMachineDuration.(machine);\n"
+               "        durationSeconds = duration / (~wfMachineClock.tempo ? 1.0).max(0.05);\n"
                "        from = machine[\\selected] ? machine[\\entry] ? 0;\n"
-               "        next = ~markovChooseNextState.(machine);\n"
-               "        ~markovJuce.sendMsg('/markov/scheduled', machine[\\id], from, next, durationSeconds);\n"
-               "        ~markovMachineClock.sched(duration, {\n"
-               "            if (~markovMachineTokens[machine[\\id]] == token) {\n"
-               "                ~markovEnterMachineState.(machine, next, false);\n"
+               "        next = ~wfChooseNextState.(machine);\n"
+               "        ~wfJuce.sendMsg('/wf/scheduled', machine[\\id], from, next, durationSeconds);\n"
+               "        ~wfMachineClock.sched(duration, {\n"
+               "            if (~wfMachineTokens[machine[\\id]] == token) {\n"
+               "                ~wfEnterMachineState.(machine, next, false);\n"
                "                scheduleNext.value;\n"
                "            };\n"
                "            nil;\n"
@@ -1210,41 +1267,41 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    scheduleNext.value;\n"
                "};\n"
-               "~markovStartChildMachine = { |machine|\n"
-               "    ~markovArmChildMachine.(machine);\n"
+               "~wfStartChildMachine = { |machine|\n"
+               "    ~wfArmChildMachine.(machine);\n"
                "    // Child machines are pre-armed here; independent child clocks stay disabled until\n"
                "    // the top-level SC scheduler is fully stable.\n"
                "};\n"
-               "~markovConfigureMachine = { |machine|\n"
-               "    ~markovPauseMachine.();\n"
-               "    ~markovConfiguredMachine = machine;\n"
-               "    (\"MARKOV_MACHINE_CONFIGURED states=\" ++ machine[\\states].size).postln;\n"
+               "~wfConfigureMachine = { |machine|\n"
+               "    ~wfPauseMachine.();\n"
+               "    ~wfConfiguredMachine = machine;\n"
+               "    (\"WF_MACHINE_CONFIGURED states=\" ++ machine[\\states].size).postln;\n"
                "};\n"
-               "~markovRunMachine = { |startState = 0, rate = 1|\n"
-               "    if (~markovConfiguredMachine.isNil) { \"MARKOV_MACHINE_MISSING\".warn; ^nil };\n"
-               "    ~markovPauseMachine.();\n"
-               "    ~markovRate = rate.max(0.05);\n"
-               "    ~markovConfiguredMachine[\\entry] = startState.clip(0, ~markovConfiguredMachine[\\states].size - 1);\n"
-               "    ~markovConfiguredMachine[\\selected] = ~markovConfiguredMachine[\\entry];\n"
-               "    ~markovEnterMachineState.(~markovConfiguredMachine, ~markovConfiguredMachine[\\entry], true);\n"
-               "    ~markovStartMachineTask.(~markovConfiguredMachine);\n"
-               "    (\"MARKOV_MACHINE_RUNNING rate=\" ++ ~markovRate).postln;\n"
+               "~wfRunMachine = { |startState = 0, rate = 1|\n"
+               "    if (~wfConfiguredMachine.isNil) { \"WF_MACHINE_MISSING\".warn; ^nil };\n"
+               "    ~wfPauseMachine.();\n"
+               "    ~wfRate = rate.max(0.05);\n"
+               "    ~wfConfiguredMachine[\\entry] = startState.clip(0, ~wfConfiguredMachine[\\states].size - 1);\n"
+               "    ~wfConfiguredMachine[\\selected] = ~wfConfiguredMachine[\\entry];\n"
+               "    ~wfEnterMachineState.(~wfConfiguredMachine, ~wfConfiguredMachine[\\entry], true);\n"
+               "    ~wfStartMachineTask.(~wfConfiguredMachine);\n"
+               "    (\"WF_MACHINE_RUNNING rate=\" ++ ~wfRate).postln;\n"
                "};\n"
-               "~markovPauseMachine = {\n"
-               "    ~markovMachineTokens.keysValuesDo { |key, token| ~markovMachineTokens[key] = token + 1 };\n"
-               "    if (~markovConfiguredMachine.notNil) { ~markovStopMachineRecursive.(~markovConfiguredMachine) };\n"
+               "~wfPauseMachine = {\n"
+               "    ~wfMachineTokens.keysValuesDo { |key, token| ~wfMachineTokens[key] = token + 1 };\n"
+               "    if (~wfConfiguredMachine.notNil) { ~wfStopMachineRecursive.(~wfConfiguredMachine) };\n"
                "};\n"
-               "~markovStepMachine = { if (~markovConfiguredMachine.notNil) { ~markovAdvanceMachine.(~markovConfiguredMachine) } };\n"
-               "OSCdef(\\markovLoad, { |msg| ~markovLoad.(msg[1].asString.asSymbol, msg[2].asString); }, '/markov/load');\n"
-               "OSCdef(\\markovLoadFrozen, { |msg| ~markovLoadFrozen.(msg[1].asString.asSymbol, msg[2].asString); }, '/markov/loadFrozen');\n"
-               "OSCdef(\\markovCheck, { |msg| ~markovCheck.(msg[1].asString, msg[2].asString, msg[3].asString); }, '/markov/check');\n"
-               "OSCdef(\\markovPlay, { |msg| ~markovPlay.(msg[1].asString.asSymbol); }, '/markov/play');\n"
-               "OSCdef(\\markovFreeze, { |msg| ~markovFreeze.(msg[1].asString.asSymbol, msg[2].asString, msg[3].asFloat); }, '/markov/freeze');\n"
-               "OSCdef(\\markovExport, { |msg| ~markovExport.(msg[1].asString, msg[2].asFloat, msg[3].asFloat, msg[4].asInteger, msg[5].asString); }, '/markov/export');\n"
-               "OSCdef(\\markovCancelExport, { ~markovCancelExport.(); }, '/markov/cancelExport');\n"
-               "OSCdef(\\markovRunMachine, { |msg| ~markovRunMachine.(msg[1].asInteger, msg[2].asFloat); }, '/markov/runMachine');\n"
-               "OSCdef(\\markovPauseMachine, { ~markovPauseMachine.(); }, '/markov/pauseMachine');\n"
-               "OSCdef(\\markovTransition, { |msg|\n"
+               "~wfStepMachine = { if (~wfConfiguredMachine.notNil) { ~wfAdvanceMachine.(~wfConfiguredMachine) } };\n"
+               "OSCdef(\\wfLoad, { |msg| ~wfLoad.(msg[1].asString.asSymbol, msg[2].asString); }, '/wf/load');\n"
+               "OSCdef(\\wfLoadFrozen, { |msg| ~wfLoadFrozen.(msg[1].asString.asSymbol, msg[2].asString); }, '/wf/loadFrozen');\n"
+               "OSCdef(\\wfCheck, { |msg| ~wfCheck.(msg[1].asString, msg[2].asString, msg[3].asString); }, '/wf/check');\n"
+               "OSCdef(\\wfPlay, { |msg| ~wfPlay.(msg[1].asString.asSymbol); }, '/wf/play');\n"
+               "OSCdef(\\wfFreeze, { |msg| ~wfFreeze.(msg[1].asString.asSymbol, msg[2].asString, msg[3].asFloat); }, '/wf/freeze');\n"
+               "OSCdef(\\wfExport, { |msg| ~wfExport.(msg[1].asString, msg[2].asFloat, msg[3].asFloat, msg[4].asInteger, msg[5].asString); }, '/wf/export');\n"
+               "OSCdef(\\wfCancelExport, { ~wfCancelExport.(); }, '/wf/cancelExport');\n"
+               "OSCdef(\\wfRunMachine, { |msg| ~wfRunMachine.(msg[1].asInteger, msg[2].asFloat); }, '/wf/runMachine');\n"
+               "OSCdef(\\wfPauseMachine, { ~wfPauseMachine.(); }, '/wf/pauseMachine');\n"
+               "OSCdef(\\wfTransition, { |msg|\n"
                "    var release = msg[1].asFloat;\n"
                "    var delay = msg[2].asFloat;\n"
                "    var stopCount = msg[3].asInteger;\n"
@@ -1252,17 +1309,19 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var playCount = msg[playOffset].asInteger;\n"
                "    var stops = Array.fill(stopCount, { |i| msg[4 + i].asString.asSymbol });\n"
                "    var plays = Array.fill(playCount, { |i| msg[playOffset + 1 + i].asString.asSymbol });\n"
-               "    ~markovTransition.(stops, plays, release, delay);\n"
-               "}, '/markov/transition');\n"
-               "OSCdef(\\markovVolume, { |msg| ~markovSetVolume.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/markov/volume');\n"
-               "OSCdef(\\markovMix, { |msg| ~markovSetMix.(msg[1].asString.asSymbol, msg[2].asFloat, msg[3].asFloat); }, '/markov/mix');\n"
-               "OSCdef(\\markovStop, { |msg| ~markovStop.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/markov/stop');\n"
-               "OSCdef(\\markovStopAll, { ~markovStopAll.(); }, '/markov/stopAll');\n"
-               "OSCdef(\\markovPanic, { ~markovPanic.(); }, '/markov/panic');\n"
-               "OSCdef(\\markovQuit, { ~markovPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil }); }, '/markov/quit');\n"
-               "~markovTest = { ~markovWhenReady.({ { SinOsc.ar(660 ! 2) * EnvGen.kr(Env.perc(0.01, 1.8), doneAction: 2) * 0.18 }.play; }); };\n"
-               "OSCdef(\\markovTest, { ~markovTest.(); }, '/markov/test');\n"
-               "~markovPollCommands = {\n"
+               "    ~wfTransition.(stops, plays, release, delay);\n"
+               "}, '/wf/transition');\n"
+               "OSCdef(\\wfVolume, { |msg| ~wfSetVolume.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/wf/volume');\n"
+               "OSCdef(\\wfMix, { |msg| ~wfSetMix.(msg[1].asString.asSymbol, msg[2].asFloat, msg[3].asFloat); }, '/wf/mix');\n"
+               "OSCdef(\\wfMasterGain, { |msg| ~wfSetMasterGain.(msg[1].asFloat); }, '/wf/masterGain');\n"
+               "OSCdef(\\wfStop, { |msg| ~wfStop.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/wf/stop');\n"
+               "OSCdef(\\wfStopAll, { ~wfStopAll.(); }, '/wf/stopAll');\n"
+               "OSCdef(\\wfClear, { ~wfClearMachine.(); }, '/wf/clear');\n"
+               "OSCdef(\\wfPanic, { ~wfPanic.(); }, '/wf/panic');\n"
+               "OSCdef(\\wfQuit, { ~wfPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil }); }, '/wf/quit');\n"
+               "~wfTest = { ~wfWhenReady.({ { SinOsc.ar(660 ! 2) * EnvGen.kr(Env.perc(0.01, 1.8), doneAction: 2) * 0.18 }.play; }); };\n"
+               "OSCdef(\\wfTest, { ~wfTest.(); }, '/wf/test');\n"
+               "~wfPollCommands = {\n"
                "    var dir = PathName(" + commandPath + ");\n"
                "    dir.files.sort({ |a, b| a.fileName < b.fileName }).do { |file|\n"
                "        if (file.extension == \"scd\") {\n"
@@ -1275,26 +1334,26 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    0.012;\n"
                "};\n"
-               "SystemClock.sched(0.012, ~markovPollCommands);\n"
+               "SystemClock.sched(0.012, ~wfPollCommands);\n"
                ")\n";
     }
 
 void SuperColliderHost::sendLoadCommand(const juce::String& laneId, const juce::String& scriptPath)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovLoad.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (scriptPath) + ");\n");
+            writeCommand ("~wfLoad.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (scriptPath) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/load", laneId, scriptPath);
+            oscSender.send ("/wf/load", laneId, scriptPath);
     }
 
 void SuperColliderHost::sendLoadFrozenCommand (const juce::String& laneId, const juce::String& audioPath)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovLoadFrozen.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (audioPath) + ");\n");
+            writeCommand ("~wfLoadFrozen.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (audioPath) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/loadFrozen", laneId, audioPath);
+            oscSender.send ("/wf/loadFrozen", laneId, audioPath);
     }
 
 void SuperColliderHost::sendFreezeCommand (const juce::String& laneId, const juce::String& audioPath, double durationSeconds)
@@ -1302,12 +1361,12 @@ void SuperColliderHost::sendFreezeCommand (const juce::String& laneId, const juc
         const auto duration = juce::jlimit (0.25, 64.0, durationSeconds);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~markovFreeze.(" + scSymbolLiteral (laneId) + ", "
+            writeCommand ("~wfFreeze.(" + scSymbolLiteral (laneId) + ", "
                           + scStringLiteral (audioPath) + ", "
                           + scFloatLiteral (duration) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/freeze", laneId, audioPath, static_cast<float> (duration));
+            oscSender.send ("/wf/freeze", laneId, audioPath, static_cast<float> (duration));
     }
 
 void SuperColliderHost::sendExportCommand (const juce::String& audioPath, double durationSeconds, double rate, int startState, const juce::String& sampleFormat)
@@ -1318,32 +1377,32 @@ void SuperColliderHost::sendExportCommand (const juce::String& audioPath, double
         const auto format = (sampleFormat == "int24" || sampleFormat == "float") ? sampleFormat : juce::String ("int16");
 
         if (shouldUseCommandFallback())
-            writeCommand ("~markovExport.(" + scStringLiteral (audioPath) + ", "
+            writeCommand ("~wfExport.(" + scStringLiteral (audioPath) + ", "
                           + scFloatLiteral (duration) + ", "
                           + scFloatLiteral (clippedRate) + ", "
                           + juce::String (clippedState) + ", "
                           + scStringLiteral (format) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/export", audioPath, static_cast<float> (duration), static_cast<float> (clippedRate), clippedState, format);
+            oscSender.send ("/wf/export", audioPath, static_cast<float> (duration), static_cast<float> (clippedRate), clippedState, format);
     }
 
 void SuperColliderHost::sendCancelExportCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovCancelExport.();\n");
+            writeCommand ("~wfCancelExport.();\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/cancelExport");
+            oscSender.send ("/wf/cancelExport");
     }
 
 void SuperColliderHost::sendPlayCommand(const juce::String& laneId)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovPlay.(" + scSymbolLiteral (laneId) + ");\n");
+            writeCommand ("~wfPlay.(" + scSymbolLiteral (laneId) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/play", laneId);
+            oscSender.send ("/wf/play", laneId);
     }
 
 void SuperColliderHost::sendTransitionCommand(const juce::StringArray& stopIds,
@@ -1357,14 +1416,14 @@ void SuperColliderHost::sendTransitionCommand(const juce::StringArray& stopIds,
                           + " delayMs=" + juce::String (clippedDelay * 1000.0, 2));
 
         if (shouldUseCommandFallback())
-            writeCommand ("~markovTransition.(" + scSymbolArrayLiteral (stopIds) + ", "
+            writeCommand ("~wfTransition.(" + scSymbolArrayLiteral (stopIds) + ", "
                           + scSymbolArrayLiteral (playIds) + ", "
                           + juce::String (releaseSeconds, 3) + ", "
                           + juce::String (clippedDelay, 4) + ");\n");
 
         if (oscConnected)
         {
-            juce::OSCMessage message ("/markov/transition");
+            juce::OSCMessage message ("/wf/transition");
             message.addFloat32 (static_cast<float> (releaseSeconds));
             message.addFloat32 (static_cast<float> (clippedDelay));
             message.addInt32 (stopIds.size());
@@ -1384,10 +1443,10 @@ void SuperColliderHost::sendVolumeCommand(const juce::String& laneId, float volu
         const auto clipped = juce::jlimit (0.0f, 1.0f, volume);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~markovSetVolume.(" + scSymbolLiteral (laneId) + ", " + juce::String (clipped, 3) + ");\n");
+            writeCommand ("~wfSetVolume.(" + scSymbolLiteral (laneId) + ", " + juce::String (clipped, 3) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/volume", laneId, clipped);
+            oscSender.send ("/wf/volume", laneId, clipped);
     }
 
 void SuperColliderHost::sendMixCommand (const juce::String& laneId, float volume, float pan)
@@ -1396,39 +1455,57 @@ void SuperColliderHost::sendMixCommand (const juce::String& laneId, float volume
         const auto clippedPan = juce::jlimit (-1.0f, 1.0f, pan);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~markovSetMix.(" + scSymbolLiteral (laneId) + ", "
+            writeCommand ("~wfSetMix.(" + scSymbolLiteral (laneId) + ", "
                           + juce::String (clippedVolume, 3) + ", "
                           + juce::String (clippedPan, 3) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/mix", laneId, clippedVolume, clippedPan);
+            oscSender.send ("/wf/mix", laneId, clippedVolume, clippedPan);
+    }
+
+void SuperColliderHost::setMasterGain (float gain)
+    {
+        const juce::ScopedLock lock (hostLock);
+        masterGain = juce::jlimit (0.0f, 5.0f, gain);
+        sendMasterGainCommand (masterGain);
+    }
+
+void SuperColliderHost::sendMasterGainCommand (float gain)
+    {
+        const auto clippedGain = juce::jlimit (0.0f, 5.0f, gain);
+
+        if (shouldUseCommandFallback())
+            writeCommand ("~wfSetMasterGain.(" + juce::String (clippedGain, 3) + ");\n");
+
+        if (oscConnected)
+            oscSender.send ("/wf/masterGain", clippedGain);
     }
 
 void SuperColliderHost::sendStopCommand(const juce::String& laneId, double releaseSeconds)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovStop.(" + scSymbolLiteral (laneId) + ", " + juce::String (releaseSeconds, 3) + ");\n");
+            writeCommand ("~wfStop.(" + scSymbolLiteral (laneId) + ", " + juce::String (releaseSeconds, 3) + ");\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/stop", laneId, static_cast<float> (releaseSeconds));
+            oscSender.send ("/wf/stop", laneId, static_cast<float> (releaseSeconds));
     }
 
 void SuperColliderHost::sendStopAllCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovStopAll.();\n");
+            writeCommand ("~wfStopAll.();\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/stopAll");
+            oscSender.send ("/wf/stopAll");
     }
 
 void SuperColliderHost::sendClearMachineCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~markovClearMachine.();\n");
+            writeCommand ("~wfClearMachine.();\n");
 
         if (oscConnected)
-            oscSender.send ("/markov/clear");
+            oscSender.send ("/wf/clear");
     }
 
 bool SuperColliderHost::shouldUseCommandFallback() const
@@ -1463,13 +1540,13 @@ void SuperColliderHost::shutdown()
         {
             if (oscConnected)
             {
-                oscSender.send ("/markov/panic");
-                oscSender.send ("/markov/quit");
+                oscSender.send ("/wf/panic");
+                oscSender.send ("/wf/quit");
                 oscSender.disconnect();
                 oscConnected = false;
             }
 
-            writeCommand ("~markovPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil });\n");
+            writeCommand ("~wfPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil });\n");
             juce::Thread::sleep (260);
 
             if (bridgeProcess->isRunning())
@@ -1586,7 +1663,7 @@ juce::String SuperColliderHost::checkScript (const juce::String& script, const j
         resultDir.createDirectory();
         auto resultFile = resultDir.getChildFile (checkId + ".txt");
         resultFile.deleteFile();
-        writeCommand ("~markovCheck.(" + scStringLiteral (checkId) + ", "
+        writeCommand ("~wfCheck.(" + scStringLiteral (checkId) + ", "
                     + scStringLiteral (scriptFile.getFullPathName()) + ", "
                     + scStringLiteral (resultFile.getFullPathName()) + ");\n");
         appendRuntimeLog ("check requested: " + checkId);

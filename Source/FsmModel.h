@@ -135,13 +135,14 @@ public:
         const auto oldSize = static_cast<int> (states.size());
         states.resize (static_cast<size_t> (newCount));
         childMachines.resize (static_cast<size_t> (newCount));
+        nodeOffsets.resize (static_cast<size_t> (newCount));
 
         for (int i = oldSize; i < newCount; ++i)
         {
             states[static_cast<size_t> (i)].index = i;
             states[static_cast<size_t> (i)].name = "State " + juce::String (i + 1);
             states[static_cast<size_t> (i)].lanes.push_back (
-                { makeLaneId (i, 0), "Lane 1", MarkovDemo::defaultScriptFor (i, 0) });
+                { makeLaneId (i, 0), "Lane 1", WfDemo::defaultScriptFor (i, 0) });
         }
 
         for (int i = 0; i < newCount; ++i)
@@ -174,7 +175,7 @@ public:
         const auto laneIndex = static_cast<int> (s.lanes.size());
         s.lanes.push_back ({ makeLaneId (selectedState, laneIndex),
                              "Lane " + juce::String (laneIndex + 1),
-                             MarkovDemo::defaultScriptFor (selectedState, laneIndex) });
+                             WfDemo::defaultScriptFor (selectedState, laneIndex) });
         selectedLane = laneIndex;
     }
 
@@ -243,102 +244,99 @@ public:
 
     void configureRootDemo()
     {
-        setStateCount (10);
+        setStateCount (9);
         childMachines.clear();
         childMachines.resize (states.size());
 
-        setStateDemo (0, "Breath", { { "Ground sine", "radiguecore" }, { "Low beating", "radiguebeating" }, { "Room air", "radigueair" } });
-        setStateDemo (1, "First partial", { { "Fundamental", "radiguecore" }, { "Upper beat", "radiguebeating" }, { "Narrow air", "radigueair" } });
-        setStateDemo (2, "Interference", { { "Beating pair", "radiguebeating" }, { "Formant veil", "radigueformant" }, { "Undertone", "radiguelow" }, { "Air thread", "radigueair" } });
-        setStateDemo (3, "Long veil", { { "Veil body", "radiguecore" }, { "Slow formant", "radigueformant" }, { "Dust band", "radigueair" } });
-        setStateDemo (4, "Narrowing", { { "Close tone", "radiguebeating" }, { "Filter line", "radigueformant" }, { "Low cloud", "radiguelow" } });
-        setStateDemo (5, "Bloom", { { "Bloom core", "radiguecore" }, { "Wide harmonic", "radigueharmonic" }, { "Bloom beat", "radiguebeating" }, { "Bloom air", "radigueair" }, { "Soft formant", "radigueformant" } });
-        setStateDemo (6, "Still centre", { { "Centre tone", "radiguecore" }, { "Harmonic field", "radigueharmonic" }, { "Sub breath", "radiguelow" }, { "Almost air", "radigueair" } });
-        setStateDemo (7, "Low cloud", { { "Deep partial", "radiguelow" }, { "Cloud beating", "radiguebeating" }, { "Muted formant", "radigueformant" } });
-        setStateDemo (8, "Bright thread", { { "Thin harmonic", "radigueformant" }, { "Thread beat", "radiguebeating" }, { "High air", "radigueair" } });
-        setStateDemo (9, "Return", { { "Return core", "radiguecore" }, { "Return low", "radiguelow" }, { "Returning air", "radigueair" } });
+        setStateDemo (0, "Boot splice", { { "Cut kit", "idmkit" }, { "Elastic sub", "idmbass" }, { "Glass flecks", "idmglass" }, { "Wire air", "idmwire" } });
+        setStateDemo (1, "Shatter funk", { { "Fracture kit", "idmkit" }, { "Micro edits", "idmfracture" }, { "Rubber bass", "idmbass" }, { "Bent stabs", "idmstabs" }, { "Wire bed", "idmwire" } });
+        setStateDemo (2, "Fold map", { { "Folded kit", "idmkit" }, { "Pin clicks", "idmfracture" }, { "Glass figure", "idmglass" }, { "Sub pivot", "idmbass" } });
+        setStateDemo (3, "Acid kernel", { { "Kernel kit", "idmkit" }, { "Acid bass", "idmbass" }, { "Nerve stabs", "idmstabs" }, { "Shards", "idmfracture" } });
+        setStateDemo (4, "Skitter field", { { "Skitter kit", "idmkit" }, { "Dust cuts", "idmfracture" }, { "Wire matrix", "idmwire" }, { "Glass answer", "idmglass" } });
+        setStateDemo (5, "Halfstep trap", { { "Broken kit", "idmkit" }, { "Deep switch", "idmbass" }, { "Sparse glass", "idmglass" }, { "Cold stabs", "idmstabs" } });
+        setStateDemo (6, "Machine choir", { { "Choir stabs", "idmstabs" }, { "Glass cloud", "idmglass" }, { "Quiet kit", "idmkit" }, { "Wire shimmer", "idmwire" } });
+        setStateDemo (7, "Crash logic", { { "Crash kit", "idmkit" }, { "Bit cuts", "idmfracture" }, { "Sub logic", "idmbass" }, { "Hard stabs", "idmstabs" }, { "Needle wire", "idmwire" } });
+        setStateDemo (8, "Afterimage", { { "Ghost kit", "idmkit" }, { "After bass", "idmbass" }, { "Glass tail", "idmglass" }, { "Thin wire", "idmwire" } });
 
-        setStateTiming (0, 42.0, 4, 4);
-        setStateTiming (1, 44.0, 4, 4);
-        setStateTiming (2, 40.0, 5, 4);
-        setStateTiming (3, 38.0, 4, 4);
-        setStateTiming (4, 46.0, 3, 4);
-        setStateTiming (5, 42.0, 6, 4);
-        setStateTiming (6, 36.0, 4, 4);
-        setStateTiming (7, 39.0, 5, 4);
-        setStateTiming (8, 48.0, 4, 4);
-        setStateTiming (9, 41.0, 4, 4);
+        setStateTiming (0, 168.0, 4, 4);
+        setStateTiming (1, 174.0, 7, 8);
+        setStateTiming (2, 171.0, 5, 4);
+        setStateTiming (3, 178.0, 4, 4);
+        setStateTiming (4, 181.0, 11, 8);
+        setStateTiming (5, 162.0, 3, 4);
+        setStateTiming (6, 166.0, 6, 4);
+        setStateTiming (7, 184.0, 7, 8);
+        setStateTiming (8, 158.0, 4, 4);
 
-        setStateArrangementBars (0, 4);
+        setStateArrangementBars (0, 2);
         setStateArrangementBars (1, 4);
-        setStateArrangementBars (2, 5);
-        setStateArrangementBars (3, 6);
-        setStateArrangementBars (4, 4);
-        setStateArrangementBars (5, 6);
+        setStateArrangementBars (2, 3);
+        setStateArrangementBars (3, 4);
+        setStateArrangementBars (4, 3);
+        setStateArrangementBars (5, 4);
         setStateArrangementBars (6, 5);
-        setStateArrangementBars (7, 5);
+        setStateArrangementBars (7, 3);
         setStateArrangementBars (8, 4);
-        setStateArrangementBars (9, 6);
 
         rules = {
-            { 0, 0, 5.0f }, { 0, 1, 1.0f },
-            { 1, 1, 4.0f }, { 1, 2, 1.0f },
-            { 2, 2, 6.0f }, { 2, 3, 1.0f }, { 2, 5, 0.35f },
-            { 3, 3, 7.0f }, { 3, 4, 1.0f },
+            { 0, 0, 2.0f }, { 0, 1, 1.0f },
+            { 1, 1, 5.0f }, { 1, 2, 1.0f }, { 1, 4, 0.4f },
+            { 2, 2, 3.0f }, { 2, 3, 1.0f },
+            { 3, 3, 5.0f }, { 3, 4, 1.0f }, { 3, 6, 0.35f },
             { 4, 4, 4.0f }, { 4, 5, 1.0f },
-            { 5, 5, 8.0f }, { 5, 6, 1.0f }, { 5, 8, 0.45f },
-            { 6, 6, 7.0f }, { 6, 7, 1.0f },
-            { 7, 7, 5.0f }, { 7, 8, 1.0f },
-            { 8, 8, 4.0f }, { 8, 9, 1.0f },
-            { 9, 9, 6.0f }, { 9, 0, 1.0f }
+            { 5, 5, 3.0f }, { 5, 6, 1.0f }, { 5, 1, 0.25f },
+            { 6, 6, 4.0f }, { 6, 7, 1.0f },
+            { 7, 7, 4.0f }, { 7, 8, 1.0f }, { 7, 2, 0.3f },
+            { 8, 8, 3.0f }, { 8, 0, 1.0f }
         };
 
-        childMachines[2] = std::make_unique<MachineModel> (machineId + "_interference_child", lanePrefix + "interference-");
-        auto& interference = *childMachines[2];
-        interference.setStateCount (5);
-        interference.timingMode = NestedTimingMode::followParent;
-        interference.parentDivision = 4;
-        interference.setStateDemo (0, "Left drift", { { "Left pair", "radiguebeating" }, { "Left air", "radigueair" } });
-        interference.setStateDemo (1, "Right drift", { { "Right pair", "radiguebeating" }, { "Right formant", "radigueformant" } });
-        interference.setStateDemo (2, "Low fold", { { "Fold low", "radiguelow" }, { "Fold core", "radiguecore" } });
-        interference.setStateDemo (3, "Still band", { { "Band formant", "radigueformant" }, { "Band air", "radigueair" } });
-        interference.setStateDemo (4, "Return beat", { { "Return pair", "radiguebeating" } });
-        interference.rules = { { 0, 0, 3.0f }, { 0, 1, 1.0f }, { 1, 1, 3.0f }, { 1, 2, 0.8f }, { 1, 3, 0.5f }, { 2, 4, 1.0f }, { 3, 4, 1.0f }, { 4, 0, 1.0f } };
-        interference.setAllLaneVolumes (0.36f);
+        childMachines[1] = std::make_unique<MachineModel> (machineId + "_shatter_child", lanePrefix + "shatter-");
+        auto& shatter = *childMachines[1];
+        shatter.setStateCount (5);
+        shatter.timingMode = NestedTimingMode::followParent;
+        shatter.parentDivision = 2;
+        shatter.setStateDemo (0, "Kick fold", { { "Fold kit", "idmkit" }, { "Fold bass", "idmbass" } });
+        shatter.setStateDemo (1, "Needles", { { "Needle edits", "idmfracture" }, { "Needle glass", "idmglass" } });
+        shatter.setStateDemo (2, "Backspin", { { "Back kit", "idmkit" }, { "Back wire", "idmwire" } });
+        shatter.setStateDemo (3, "Stab cell", { { "Cell stabs", "idmstabs" } });
+        shatter.setStateDemo (4, "Mute cut", { { "Cut wire", "idmwire" }, { "Cut clicks", "idmfracture" } });
+        shatter.rules = { { 0, 0, 2.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 3, 0.8f }, { 2, 4, 0.5f }, { 3, 0, 1.0f }, { 4, 0, 1.0f } };
+        shatter.setAllLaneVolumes (0.42f);
 
-        interference.childMachines[1] = std::make_unique<MachineModel> (interference.machineId + "_slow_beads", interference.lanePrefix + "beads-");
-        auto& beads = *interference.childMachines[1];
-        beads.setStateCount (3);
-        beads.timingMode = NestedTimingMode::freeRun;
-        beads.parentDivision = 6;
-        beads.setStateDemo (0, "Bead A", { { "Bead tone", "radiguebeating" } });
-        beads.setStateDemo (1, "Bead B", { { "Bead air", "radigueair" } });
-        beads.setStateDemo (2, "Bead C", { { "Bead formant", "radigueformant" } });
-        beads.rules = { { 0, 0, 4.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
-        beads.setAllLaneVolumes (0.26f);
+        shatter.childMachines[2] = std::make_unique<MachineModel> (shatter.machineId + "_ratchet_child", shatter.lanePrefix + "ratchet-");
+        auto& ratchet = *shatter.childMachines[2];
+        ratchet.setStateCount (3);
+        ratchet.timingMode = NestedTimingMode::freeRun;
+        ratchet.parentDivision = 3;
+        ratchet.setStateDemo (0, "Ratchet A", { { "Fast cuts", "idmfracture" } });
+        ratchet.setStateDemo (1, "Ratchet B", { { "Glass pin", "idmglass" } });
+        ratchet.setStateDemo (2, "Ratchet C", { { "Wire pin", "idmwire" } });
+        ratchet.rules = { { 0, 0, 2.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
+        ratchet.setAllLaneVolumes (0.30f);
 
-        childMachines[5] = std::make_unique<MachineModel> (machineId + "_bloom_child", lanePrefix + "bloom-");
-        auto& bloom = *childMachines[5];
-        bloom.setStateCount (4);
-        bloom.timingMode = NestedTimingMode::followParent;
-        bloom.parentDivision = 5;
-        bloom.setStateDemo (0, "Opening", { { "Opening core", "radiguecore" }, { "Opening air", "radigueair" } });
-        bloom.setStateDemo (1, "Widen", { { "Widen pair", "radiguebeating" }, { "Widen formant", "radigueformant" } });
-        bloom.setStateDemo (2, "Held light", { { "Held core", "radiguecore" }, { "Held harmonic", "radigueharmonic" }, { "Held air", "radigueair" } });
-        bloom.setStateDemo (3, "Settle", { { "Settle low", "radiguelow" }, { "Settle beat", "radiguebeating" } });
-        bloom.rules = { { 0, 0, 4.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 2, 5.0f }, { 2, 3, 1.0f }, { 3, 0, 1.0f } };
-        bloom.setAllLaneVolumes (0.34f);
+        childMachines[4] = std::make_unique<MachineModel> (machineId + "_skitter_child", lanePrefix + "skitter-");
+        auto& skitter = *childMachines[4];
+        skitter.setStateCount (4);
+        skitter.timingMode = NestedTimingMode::freeRun;
+        skitter.parentDivision = 4;
+        skitter.setStateDemo (0, "Grid A", { { "Grid kit", "idmkit" } });
+        skitter.setStateDemo (1, "Grid B", { { "Grid edits", "idmfracture" } });
+        skitter.setStateDemo (2, "Grid C", { { "Grid glass", "idmglass" }, { "Grid wire", "idmwire" } });
+        skitter.setStateDemo (3, "Grid D", { { "Grid bass", "idmbass" } });
+        skitter.rules = { { 0, 1, 1.0f }, { 1, 1, 2.0f }, { 1, 2, 1.0f }, { 2, 3, 0.8f }, { 2, 0, 0.4f }, { 3, 0, 1.0f } };
+        skitter.setAllLaneVolumes (0.36f);
 
-        childMachines[8] = std::make_unique<MachineModel> (machineId + "_thread_child", lanePrefix + "thread-");
-        auto& thread = *childMachines[8];
-        thread.setStateCount (3);
-        thread.timingMode = NestedTimingMode::freeRun;
-        thread.parentDivision = 3;
-        thread.setStateDemo (0, "Harmonic", { { "Harmonic formant", "radigueformant" } });
-        thread.setStateDemo (1, "Dust", { { "Dust air", "radigueair" } });
-        thread.setStateDemo (2, "Beat", { { "Fine beat", "radiguebeating" } });
-        thread.rules = { { 0, 0, 5.0f }, { 0, 1, 1.0f }, { 1, 1, 4.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
-        thread.setAllLaneVolumes (0.28f);
+        childMachines[6] = std::make_unique<MachineModel> (machineId + "_choir_child", lanePrefix + "choir-");
+        auto& choir = *childMachines[6];
+        choir.setStateCount (4);
+        choir.timingMode = NestedTimingMode::followParent;
+        choir.parentDivision = 3;
+        choir.setStateDemo (0, "Harm A", { { "Harm stabs", "idmstabs" }, { "Harm glass", "idmglass" } });
+        choir.setStateDemo (1, "Harm B", { { "Folding stabs", "idmstabs" } });
+        choir.setStateDemo (2, "Harm C", { { "Quiet wire", "idmwire" }, { "Tiny kit", "idmkit" } });
+        choir.setStateDemo (3, "Harm D", { { "Glass return", "idmglass" } });
+        choir.rules = { { 0, 0, 3.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 2, 2.0f }, { 2, 3, 1.0f }, { 3, 0, 1.0f } };
+        choir.setAllLaneVolumes (0.34f);
 
         selectedState = 0;
         selectedLane = 0;
@@ -459,14 +457,14 @@ public:
             auto role = juce::String (lane.second);
             Lane demoLane { makeLaneId (stateIndex, laneIndex),
                             lane.first,
-                            MarkovDemo::scriptForRole (role, stateIndex, laneIndex) };
-            demoLane.volume = MarkovDemo::volumeForRole (role);
+                            WfDemo::scriptForRole (role, stateIndex, laneIndex) };
+            demoLane.volume = WfDemo::volumeForRole (role);
             s.lanes.push_back (std::move (demoLane));
             ++laneIndex;
         }
 
         if (s.lanes.empty())
-            s.lanes.push_back ({ makeLaneId (stateIndex, 0), "Lane 1", MarkovDemo::defaultScriptFor (stateIndex, 0) });
+            s.lanes.push_back ({ makeLaneId (stateIndex, 0), "Lane 1", WfDemo::defaultScriptFor (stateIndex, 0) });
     }
 
     void setStateDemo (int stateIndex, const juce::String& name, std::initializer_list<std::pair<const char*, const char*>> laneDefs)
@@ -491,6 +489,7 @@ public:
     std::vector<State> states;
     std::vector<std::unique_ptr<MachineModel>> childMachines;
     std::vector<Rule> rules;
+    std::vector<juce::Point<float>> nodeOffsets;
     juce::String machineId;
     juce::String lanePrefix;
     NestedTimingMode timingMode = NestedTimingMode::followParent;

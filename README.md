@@ -1,4 +1,4 @@
-# Markov FSM
+# wf::
 
 A JUCE/C++ desktop app for performing with a finite-state machine whose states host live SuperCollider lanes.
 
@@ -6,7 +6,7 @@ A JUCE/C++ desktop app for performing with a finite-state machine whose states h
 
 ```sh
 cmake -S . -B build -DJUCE_PATH=../Granny/JUCE
-cmake --build build --target MarkovFSM -j 6
+cmake --build build --target wf -j 6
 ```
 
 If your JUCE checkout is somewhere else, pass that folder as `JUCE_PATH`.
@@ -16,16 +16,16 @@ If your JUCE checkout is somewhere else, pass that folder as `JUCE_PATH`.
 The built macOS app is:
 
 ```text
-build/MarkovFSM_artefacts/Markov FSM.app
+build/wf_artefacts/Debug/wf.app
 ```
 
 ## SuperCollider
 
-Each state can contain one or more lanes. A lane is a live `.scd` script buffer. Use `Play` to run the selected lane, or `Run FSM` / `Step` to play all lanes in the active state while the FSM advances through weighted transition rules.
+Each state can contain one or more lanes. A lane is a live `.scd` script buffer. Use `Play` to run the selected lane, or `Run` / `Step` to play all lanes in the active state while the FSM advances through weighted transition rules.
 
 For tighter standalone audio-app behavior, the app keeps one persistent `sclang` bridge alive, boots the SuperCollider server once, and preloads lane programs. This avoids spawning a new language process for every lane, while the JUCE transport keeps parent and nested FSM state changes deterministic.
 
-Use `Boot audio` before performing to start the bridge and preload every lane program without playing anything. When `Run FSM` starts, the app also preloads all lanes before the first transition.
+Use `Boot audio` before performing to start the bridge and preload every lane program without playing anything. When `Run` starts, the app also preloads all lanes before the first transition.
 
 JUCE sends setup, play/stop, and emergency commands over OSC to the persistent language process on `127.0.0.1:57141`, with an ordered file-backed command path as startup insurance. Hidden code-level latency profiles control SC scheduling and buffer size without adding UI.
 

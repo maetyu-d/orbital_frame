@@ -1,13 +1,13 @@
 #include "DemoScripts.h"
 
-namespace MarkovDemo
+namespace WfDemo
 {
 juce::String defaultScriptFor (int stateIndex, int laneIndex)
 {
     auto freq = 160 + (stateIndex * 53) + (laneIndex * 37);
     return "(\n"
            "{ |gate=1, fade=0.12, vol=1|\n"
-           "    var pulse = Impulse.kr((~markovTempoHz ? 1) * " + juce::String (4 + laneIndex) + ", 0.0);\n"
+           "    var pulse = Impulse.kr((~wfTempoHz ? 1) * " + juce::String (4 + laneIndex) + ", 0.0);\n"
            "    var env = Decay2.kr(pulse, 0.01, 0.22);\n"
            "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
            "    var tone = SinOsc.ar(" + juce::String (freq) + " * [1, 1.005]);\n"
@@ -112,11 +112,120 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
                "}.play;\n"
                ")\n";
 
+    if (baseRole == "idmkit")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var clock = Impulse.kr((~wfTempoHz ? 1) * 4.0, 0.0);\n"
+               "    var step = PulseCount.kr(clock) % 32;\n"
+               "    var kpat = Dseq([1,0,0,0, 0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,0,0, 0,0,1,0, 0,1,0,0, 1,0,0,1], inf);\n"
+               "    var spat = Dseq([0,0,1,0, 0,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1, 0,1,0,0, 0,0,1,0, 0,1,0,0], inf);\n"
+               "    var hpat = Dseq([1,0,1,1, 0,1,0,1, 1,1,0,1, 0,1,1,0], inf);\n"
+               "    var gpat = Dseq([0,0,0,0, 1,0,0,0, 0,0,0,1, 0,0,1,0, 0,1,0,0, 0,0,0,0, 1,0,1,0], inf);\n"
+               "    var ktrig = clock * Demand.kr(clock, 0, kpat);\n"
+               "    var strig = clock * Demand.kr(clock, 0, spat);\n"
+               "    var htrig = clock * Demand.kr(clock, 0, hpat);\n"
+               "    var gtrig = clock * Demand.kr(clock, 0, gpat) * (step > 3);\n"
+               "    var kick = SinOsc.ar(46 + EnvGen.kr(Env.perc(0.001, 0.035, 34, -7), ktrig)) * EnvGen.kr(Env.perc(0.003, 0.13, curve: -5), ktrig);\n"
+               "    var snare = (BPF.ar(PinkNoise.ar(0.42), 1350, 0.45) + SinOsc.ar(184, 0, 0.06)) * EnvGen.kr(Env.perc(0.002, 0.075), strig);\n"
+               "    var hat = HPF.ar(WhiteNoise.ar(0.12), 5200) * EnvGen.kr(Env.perc(0.001, 0.032), htrig);\n"
+               "    var ticks = SinOsc.ar(TRand.kr(360, 1450, gtrig), 0, 0.10) * EnvGen.kr(Env.perc(0.001, 0.026), gtrig);\n"
+               "    var sig = (kick * 0.72) + (snare * 0.32) + (hat * 0.13) + (ticks * 0.12);\n"
+               "    sig = LeakDC.ar(HPF.ar(LPF.ar(sig.tanh, 6800), 34));\n"
+               "    Pan2.ar(Limiter.ar(sig, 0.24, 0.006), LFNoise1.kr(0.9).range(-0.08, 0.08)) * active * vol * 0.25;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "idmfracture")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var clock = Impulse.kr((~wfTempoHz ? 1) * 8.0, 0.0);\n"
+               "    var pat = Dseq([1,0,1,0, 0,1,0,1, 1,1,0,0, 1,0,1,1, 0,0,1,0, 1,0,0,1], inf);\n"
+               "    var trig = clock * Demand.kr(clock, 0, pat);\n"
+               "    var freq = Demand.kr(trig, 0, Dseq([" + juce::String (melodicRoot + 24) + ", "
+                    + juce::String (melodicRoot + 31) + ", " + juce::String (melodicRoot + 19) + ", "
+                    + juce::String (melodicRoot + 36) + ", " + juce::String (melodicRoot + 27) + "].midicps, inf));\n"
+               "    var env = EnvGen.kr(Env.perc(0.001, 0.045, curve: -7), trig);\n"
+               "    var sig = (SinOsc.ar(freq * [1, 1.006]) + Pulse.ar(freq * 2, 0.38, 0.13)) * env;\n"
+               "    sig = RHPF.ar(sig, Decay2.kr(trig, 0.004, 0.06).range(900, 5200), 0.34);\n"
+               "    sig = Splay.ar(sig, 0.64);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(sig, 180)), 0.18) * active * vol * 0.13;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "idmbass")
+    {
+        const auto bassRoot = 31 + (stateIndex % 5) * 2 + laneIndex;
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 2.0, 0.0);\n"
+               "    var seq = Dseq([" + juce::String (bassRoot) + ", " + juce::String (bassRoot + 12) + ", "
+                    + juce::String (bassRoot + 7) + ", " + juce::String (bassRoot + 5) + ", "
+                    + juce::String (bassRoot) + ", " + juce::String (bassRoot + 10) + ", "
+                    + juce::String (bassRoot + 3) + ", " + juce::String (bassRoot + 15) + "].midicps, inf);\n"
+               "    var freq = Lag.kr(Demand.kr(trig, 0, seq), 0.018);\n"
+               "    var env = EnvGen.kr(Env.perc(0.006, 0.17, curve: -4), trig);\n"
+               "    var sig = (Pulse.ar(freq * [0.5, 1], [0.46, 0.52], [0.22, 0.18]).sum + SinOsc.ar(freq, 0, 0.22)) * env;\n"
+               "    sig = RLPF.ar(sig.tanh, Decay2.kr(trig, 0.015, 0.11).range(160, 1350), 0.24);\n"
+               "    sig = LeakDC.ar(HPF.ar(sig, 35));\n"
+               "    Pan2.ar(Limiter.ar(sig, 0.28, 0.008), -0.04) * active * vol * 0.29;\n"
+               "}.play;\n"
+               ")\n";
+    }
+
+    if (baseRole == "idmstabs")
+    {
+        const auto stabRoot = 48 + (stateIndex * 2) + laneIndex;
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.5, 0.0) * Demand.kr(Impulse.kr((~wfTempoHz ? 1) * 1.5, 0.0), 0, Dseq([1,0,0,1, 0,1,0,0], inf));\n"
+               "    var root = Demand.kr(trig, 0, Dseq([" + juce::String (stabRoot) + ", "
+                    + juce::String (stabRoot + 5) + ", " + juce::String (stabRoot + 10) + ", "
+                    + juce::String (stabRoot + 3) + "].midicps, inf));\n"
+               "    var env = EnvGen.kr(Env.perc(0.004, 0.30, curve: -5), trig);\n"
+               "    var chord = root * [1, 1.25, 1.5, 2.0];\n"
+               "    var sig = Mix(VarSaw.ar(chord * LFNoise1.kr(0.8 ! 4).range(0.995, 1.006), 0, 0.35, 0.14)) * env;\n"
+               "    sig = RLPF.ar(sig, Decay2.kr(trig, 0.02, 0.24).range(620, 3600), 0.25);\n"
+               "    sig = Splay.ar([sig, DelayC.ar(sig, 0.18, 0.083) * 0.20], 0.48);\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(sig, 110)), 0.24) * active * vol * 0.18;\n"
+               "}.play;\n"
+               ")\n";
+    }
+
+    if (baseRole == "idmglass")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 3.0, 0.0) * Demand.kr(Impulse.kr((~wfTempoHz ? 1) * 3.0, 0.0), 0, Dseq([1,0,0,1, 1,0,1,0, 0,1,0,0], inf));\n"
+               "    var freq = Demand.kr(trig, 0, Dseq([" + juce::String (phraseRoot + 12) + ", "
+                    + juce::String (phraseRoot + 19) + ", " + juce::String (phraseRoot + 17) + ", "
+                    + juce::String (phraseRoot + 24) + ", " + juce::String (phraseRoot + 14) + "].midicps, inf));\n"
+               "    var env = EnvGen.kr(Env.perc(0.002, 0.18, curve: -6), trig);\n"
+               "    var sig = SinOsc.ar(freq * [1, 1.5, 2.01], 0, [0.20, 0.08, 0.045]).sum * env;\n"
+               "    sig = CombC.ar(sig, 0.32, [0.067, 0.101], 0.34) + sig;\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(Splay.ar(sig, 0.55), 5200), 240)), 0.18) * active * vol * 0.15;\n"
+               "}.play;\n"
+               ")\n";
+
+    if (baseRole == "idmwire")
+        return "(\n"
+               "{ |gate=1, fade=0.12, vol=1|\n"
+               "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
+               "    var wander = LFNoise1.kr([0.23, 0.31]).range(" + juce::String (textureHz + 220) + ", " + juce::String (textureHz + 1200) + ");\n"
+               "    var sig = BPF.ar(PinkNoise.ar(0.09 ! 2), wander, LFNoise1.kr(0.19).range(0.06, 0.20));\n"
+               "    sig = sig + (SinOsc.ar(wander * [0.5, 0.503], 0, 0.016));\n"
+               "    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 3800), 150)), 0.13) * active * vol * 0.15;\n"
+               "}.play;\n"
+               ")\n";
+
     if (baseRole == "pulse")
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 2, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 2, 0.0);\n"
                "    var env = Decay2.kr(trig, 0.002, 0.18);\n"
                "    var sweep = EnvGen.kr(Env.perc(0.001, 0.06, 42, -5), trig);\n"
                "    var kick = SinOsc.ar(42 + sweep) * env * 0.62;\n"
@@ -129,7 +238,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var clock = Impulse.kr((~markovTempoHz ? 1) * 4.0, 0.0);\n"
+               "    var clock = Impulse.kr((~wfTempoHz ? 1) * 4.0, 0.0);\n"
                "    var kpat = Dseq([1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0], inf);\n"
                "    var spat = Dseq([0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0], inf);\n"
                "    var hpat = Dseq([0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0], inf);\n"
@@ -154,7 +263,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 1.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.0, 0.0);\n"
                "    var notes = Demand.kr(trig, 0, Dseq([" + juce::String (melodicRoot + 12) + ", "
                     + juce::String (melodicRoot + 19) + ", " + juce::String (melodicRoot + 24) + ", "
                     + juce::String (melodicRoot + 31) + "].midicps, inf));\n"
@@ -171,7 +280,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 1.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.0, 0.0);\n"
                "    var seq = Dseq([" + juce::String (leadRoot) + ", " + juce::String (leadRoot + 4) + ", "
                     + juce::String (leadRoot + 7) + ", " + juce::String (leadRoot + 12) + ", "
                     + juce::String (leadRoot + 11) + ", " + juce::String (leadRoot + 7) + ", "
@@ -197,7 +306,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 2.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 2.0, 0.0);\n"
                "    var seq = Dseq([" + juce::String (arpRoot) + ", " + juce::String (arpRoot + 7) + ", "
                     + juce::String (arpRoot + 12) + ", " + juce::String (arpRoot + 16) + ", "
                     + juce::String (arpRoot + 19) + ", " + juce::String (arpRoot + 16) + ", "
@@ -230,7 +339,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 1.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.0, 0.0);\n"
                "    var seq = Dseq([" + juce::String (counterRoot + 19) + ", " + juce::String (counterRoot + 16) + ", "
                     + juce::String (counterRoot + 12) + ", " + juce::String (counterRoot + 7) + ", "
                     + juce::String (counterRoot + 11) + ", " + juce::String (counterRoot + 14) + ", "
@@ -252,7 +361,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 0.5, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 0.5, 0.0);\n"
                "    var roots = Demand.kr(trig, 0, Dseq([" + juce::String (chordRoot) + ", "
                     + juce::String (chordRoot + 5) + ", " + juce::String (chordRoot + 9) + ", "
                     + juce::String (chordRoot + 7)
@@ -271,7 +380,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 1.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.0, 0.0);\n"
                "    var freq = Demand.kr(trig, 0, Dseq([" + juce::String (phraseRoot + 7) + ", "
                     + juce::String (phraseRoot + 12) + ", " + juce::String (phraseRoot + 14) + ", "
                     + juce::String (phraseRoot + 12) + ", " + juce::String (phraseRoot + 5) + ", "
@@ -292,7 +401,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * 1.0, 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * 1.0, 0.0);\n"
                "    var seq = Dseq([" + juce::String (lineRoot) + ", " + juce::String (lineRoot) + ", "
                     + juce::String (lineRoot + 7) + ", " + juce::String (lineRoot) + ", "
                     + juce::String (lineRoot + 12) + ", " + juce::String (lineRoot + 12) + ", "
@@ -329,7 +438,7 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var trig = Impulse.kr((~markovTempoHz ? 1) * (3 + LFNoise0.kr(0.7).range(0, 2)), 0.0);\n"
+               "    var trig = Impulse.kr((~wfTempoHz ? 1) * (3 + LFNoise0.kr(0.7).range(0, 2)), 0.0);\n"
                "    var env = Decay2.kr(trig, 0.004, TRand.kr(0.05, 0.16, trig));\n"
                "    var freq = TRand.kr(140, 740, trig);\n"
                "    var sig = SinOsc.ar(freq * [1, 1.012]) * env;\n"
@@ -342,14 +451,14 @@ juce::String scriptForRole (const juce::String& role, int stateIndex, int laneIn
         return "(\n"
                "{ |gate=1, fade=0.12, vol=1|\n"
                "    var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);\n"
-               "    var clock = Impulse.kr((~markovTempoHz ? 1) * 6, 0.0);\n"
+               "    var clock = Impulse.kr((~wfTempoHz ? 1) * 6, 0.0);\n"
                "    var step = PulseCount.kr(clock) % 32;\n"
                "    var kpat = Dseq([1,0,0,0, 0,0,1,0, 1,0,0,1, 0,0,1,0, 1,0,0,0, 0,1,0,0, 1,0,0,0, 0,0,0,1], inf);\n"
                "    var spat = Dseq([0,0,1,0, 0,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,1,0, 0,0,0,0, 0,0,1,0, 0,1,0,0], inf);\n"
                "    var hpat = Dseq([1,0,0,0, 0,1,0,0, 1,0,0,0, 0,0,0,0], inf);\n"
                "    var ktrig = clock * Demand.kr(clock, 0, kpat);\n"
                "    var strig = clock * Demand.kr(clock, 0, spat);\n"
-               "    var htrig = clock * Demand.kr(clock, 0, hpat) * ToggleFF.kr(Impulse.kr((~markovTempoHz ? 1) * 0.75, 0.0));\n"
+               "    var htrig = clock * Demand.kr(clock, 0, hpat) * ToggleFF.kr(Impulse.kr((~wfTempoHz ? 1) * 0.75, 0.0));\n"
                "    var glitch = clock * (step > 29) * (TRand.kr(0, 1, clock) > 0.72);\n"
                "    var kick = SinOsc.ar(44 + EnvGen.kr(Env.perc(0.001, 0.045, 38, -6), ktrig)) * Decay2.kr(ktrig, 0.003, 0.095);\n"
                "    var snare = (SinOsc.ar(176) + LFTri.ar(118, 0, 0.4)) * Decay2.kr(strig, 0.004, 0.06);\n"
@@ -394,6 +503,12 @@ float volumeForRole (const juce::String& role)
     if (baseRole == "radigueformant") return 0.50f;
     if (baseRole == "radigueharmonic") return 0.56f;
     if (baseRole == "radiguelow")     return 0.48f;
+    if (baseRole == "idmkit")      return 0.72f;
+    if (baseRole == "idmfracture") return 0.42f;
+    if (baseRole == "idmbass")     return 0.74f;
+    if (baseRole == "idmstabs")    return 0.54f;
+    if (baseRole == "idmglass")    return 0.46f;
+    if (baseRole == "idmwire")     return 0.34f;
     return 0.48f;
 }
 }
