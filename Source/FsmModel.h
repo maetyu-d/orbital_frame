@@ -112,13 +112,18 @@ struct Rule
 class MachineModel
 {
 public:
-    explicit MachineModel (juce::String machineIdToUse = "root", juce::String lanePrefixToUse = "")
+    explicit MachineModel (juce::String machineIdToUse = "root", juce::String lanePrefixToUse = "", bool loadRootDemo = true)
         : machineId (std::move (machineIdToUse)), lanePrefix (std::move (lanePrefixToUse))
     {
         setStateCount (5);
         regenerateRingRules();
         if (machineId == "root" && lanePrefix.isEmpty())
-            configureRootDemo();
+        {
+            if (loadRootDemo)
+                configureRootDemo();
+            else
+                configureBlankRoot();
+        }
         else
             configureDefaultChildDemo();
     }
@@ -244,102 +249,117 @@ public:
 
     void configureRootDemo()
     {
-        setStateCount (9);
+        setStateCount (10);
         childMachines.clear();
         childMachines.resize (states.size());
 
-        setStateDemo (0, "Boot splice", { { "Cut kit", "idmkit" }, { "Elastic sub", "idmbass" }, { "Glass flecks", "idmglass" }, { "Wire air", "idmwire" } });
-        setStateDemo (1, "Shatter funk", { { "Fracture kit", "idmkit" }, { "Micro edits", "idmfracture" }, { "Rubber bass", "idmbass" }, { "Bent stabs", "idmstabs" }, { "Wire bed", "idmwire" } });
-        setStateDemo (2, "Fold map", { { "Folded kit", "idmkit" }, { "Pin clicks", "idmfracture" }, { "Glass figure", "idmglass" }, { "Sub pivot", "idmbass" } });
-        setStateDemo (3, "Acid kernel", { { "Kernel kit", "idmkit" }, { "Acid bass", "idmbass" }, { "Nerve stabs", "idmstabs" }, { "Shards", "idmfracture" } });
-        setStateDemo (4, "Skitter field", { { "Skitter kit", "idmkit" }, { "Dust cuts", "idmfracture" }, { "Wire matrix", "idmwire" }, { "Glass answer", "idmglass" } });
-        setStateDemo (5, "Halfstep trap", { { "Broken kit", "idmkit" }, { "Deep switch", "idmbass" }, { "Sparse glass", "idmglass" }, { "Cold stabs", "idmstabs" } });
-        setStateDemo (6, "Machine choir", { { "Choir stabs", "idmstabs" }, { "Glass cloud", "idmglass" }, { "Quiet kit", "idmkit" }, { "Wire shimmer", "idmwire" } });
-        setStateDemo (7, "Crash logic", { { "Crash kit", "idmkit" }, { "Bit cuts", "idmfracture" }, { "Sub logic", "idmbass" }, { "Hard stabs", "idmstabs" }, { "Needle wire", "idmwire" } });
-        setStateDemo (8, "Afterimage", { { "Ghost kit", "idmkit" }, { "After bass", "idmbass" }, { "Glass tail", "idmglass" }, { "Thin wire", "idmwire" } });
+        setStateDemo (0, "Radigue cell", { { "Root body", "radiguecore" },
+                                           { "Low filament", "radiguelow" },
+                                           { "Breath band", "radigueair" } });
+        setStateDemo (1, "First beating", { { "Close beating", "radiguebeating" },
+                                             { "Root shadow", "radiguecore" },
+                                             { "Low room", "radiguelow" } });
+        setStateDemo (2, "Air fold", { { "Air veil", "radigueair" },
+                                        { "Folding formant", "radigueformant" },
+                                        { "Quiet root", "radiguecore" } });
+        setStateDemo (3, "Low bloom", { { "Deep bloom", "radiguelow" },
+                                         { "Slow body", "radiguecore" },
+                                         { "Soft beating", "radiguebeating" } });
+        setStateDemo (4, "Harmonic swell", { { "Wide harmonic", "radigueharmonic" },
+                                              { "Body partials", "radiguecore" },
+                                              { "Low anchor", "radiguelow" },
+                                              { "Air edge", "radigueair" } });
+        setStateDemo (5, "Formant veil", { { "Veil sweep", "radigueformant" },
+                                            { "Breath partial", "radigueair" },
+                                            { "Sub tone", "radiguelow" } });
+        setStateDemo (6, "Wide beating", { { "Wide beating", "radiguebeating" },
+                                            { "Harmonic dust", "radigueharmonic" },
+                                            { "Root undertone", "radiguecore" } });
+        setStateDemo (7, "Sub mirror", { { "Mirror low", "radiguelow" },
+                                          { "Second body", "radiguecore" },
+                                          { "Remote air", "radigueair" } });
+        setStateDemo (8, "Cathedral partials", { { "Cathedral bank", "radigueharmonic" },
+                                                  { "Formant column", "radigueformant" },
+                                                  { "Beating halo", "radiguebeating" },
+                                                  { "Air ceiling", "radigueair" } });
+        setStateDemo (9, "Coda field", { { "Coda body", "radiguecore" },
+                                          { "Coda low", "radiguelow" },
+                                          { "Coda air", "radigueair" },
+                                          { "Coda harmonic", "radigueharmonic" } });
 
-        setStateTiming (0, 168.0, 4, 4);
-        setStateTiming (1, 174.0, 7, 8);
-        setStateTiming (2, 171.0, 5, 4);
-        setStateTiming (3, 178.0, 4, 4);
-        setStateTiming (4, 181.0, 11, 8);
-        setStateTiming (5, 162.0, 3, 4);
-        setStateTiming (6, 166.0, 6, 4);
-        setStateTiming (7, 184.0, 7, 8);
-        setStateTiming (8, 158.0, 4, 4);
+        setStateTiming (0, 48.0, 4, 4);
+        setStateTiming (1, 50.0, 4, 4);
+        setStateTiming (2, 52.0, 5, 4);
+        setStateTiming (3, 46.0, 4, 4);
+        setStateTiming (4, 54.0, 6, 4);
+        setStateTiming (5, 49.0, 4, 4);
+        setStateTiming (6, 51.0, 7, 4);
+        setStateTiming (7, 45.0, 4, 4);
+        setStateTiming (8, 56.0, 5, 4);
+        setStateTiming (9, 47.0, 4, 4);
 
-        setStateArrangementBars (0, 2);
-        setStateArrangementBars (1, 4);
-        setStateArrangementBars (2, 3);
-        setStateArrangementBars (3, 4);
-        setStateArrangementBars (4, 3);
-        setStateArrangementBars (5, 4);
-        setStateArrangementBars (6, 5);
-        setStateArrangementBars (7, 3);
-        setStateArrangementBars (8, 4);
+        setStateArrangementBars (0, 8);
+        setStateArrangementBars (1, 12);
+        setStateArrangementBars (2, 10);
+        setStateArrangementBars (3, 14);
+        setStateArrangementBars (4, 16);
+        setStateArrangementBars (5, 10);
+        setStateArrangementBars (6, 12);
+        setStateArrangementBars (7, 14);
+        setStateArrangementBars (8, 18);
+        setStateArrangementBars (9, 16);
 
         rules = {
-            { 0, 0, 2.0f }, { 0, 1, 1.0f },
-            { 1, 1, 5.0f }, { 1, 2, 1.0f }, { 1, 4, 0.4f },
-            { 2, 2, 3.0f }, { 2, 3, 1.0f },
-            { 3, 3, 5.0f }, { 3, 4, 1.0f }, { 3, 6, 0.35f },
-            { 4, 4, 4.0f }, { 4, 5, 1.0f },
-            { 5, 5, 3.0f }, { 5, 6, 1.0f }, { 5, 1, 0.25f },
-            { 6, 6, 4.0f }, { 6, 7, 1.0f },
-            { 7, 7, 4.0f }, { 7, 8, 1.0f }, { 7, 2, 0.3f },
-            { 8, 8, 3.0f }, { 8, 0, 1.0f }
+            { 0, 0, 9.0f },  { 0, 1, 1.0f },  { 0, 3, 0.25f },
+            { 1, 1, 11.0f }, { 1, 2, 1.0f },
+            { 2, 2, 10.0f }, { 2, 3, 1.0f },  { 2, 5, 0.35f },
+            { 3, 3, 12.0f }, { 3, 4, 1.0f },
+            { 4, 4, 16.0f }, { 4, 5, 1.0f },  { 4, 8, 0.55f },
+            { 5, 5, 9.0f },  { 5, 6, 1.0f },
+            { 6, 6, 12.0f }, { 6, 7, 1.0f },  { 6, 4, 0.30f },
+            { 7, 7, 13.0f }, { 7, 8, 1.0f },
+            { 8, 8, 18.0f }, { 8, 9, 1.0f },  { 8, 4, 0.45f },
+            { 9, 9, 14.0f }, { 9, 0, 1.0f },  { 9, 6, 0.30f }
         };
 
-        childMachines[1] = std::make_unique<MachineModel> (machineId + "_shatter_child", lanePrefix + "shatter-");
-        auto& shatter = *childMachines[1];
-        shatter.setStateCount (5);
-        shatter.timingMode = NestedTimingMode::followParent;
-        shatter.parentDivision = 2;
-        shatter.setStateDemo (0, "Kick fold", { { "Fold kit", "idmkit" }, { "Fold bass", "idmbass" } });
-        shatter.setStateDemo (1, "Needles", { { "Needle edits", "idmfracture" }, { "Needle glass", "idmglass" } });
-        shatter.setStateDemo (2, "Backspin", { { "Back kit", "idmkit" }, { "Back wire", "idmwire" } });
-        shatter.setStateDemo (3, "Stab cell", { { "Cell stabs", "idmstabs" } });
-        shatter.setStateDemo (4, "Mute cut", { { "Cut wire", "idmwire" }, { "Cut clicks", "idmfracture" } });
-        shatter.rules = { { 0, 0, 2.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 3, 0.8f }, { 2, 4, 0.5f }, { 3, 0, 1.0f }, { 4, 0, 1.0f } };
-        shatter.setAllLaneVolumes (0.42f);
-
-        shatter.childMachines[2] = std::make_unique<MachineModel> (shatter.machineId + "_ratchet_child", shatter.lanePrefix + "ratchet-");
-        auto& ratchet = *shatter.childMachines[2];
-        ratchet.setStateCount (3);
-        ratchet.timingMode = NestedTimingMode::freeRun;
-        ratchet.parentDivision = 3;
-        ratchet.setStateDemo (0, "Ratchet A", { { "Fast cuts", "idmfracture" } });
-        ratchet.setStateDemo (1, "Ratchet B", { { "Glass pin", "idmglass" } });
-        ratchet.setStateDemo (2, "Ratchet C", { { "Wire pin", "idmwire" } });
-        ratchet.rules = { { 0, 0, 2.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 0, 1.0f } };
-        ratchet.setAllLaneVolumes (0.30f);
-
-        childMachines[4] = std::make_unique<MachineModel> (machineId + "_skitter_child", lanePrefix + "skitter-");
-        auto& skitter = *childMachines[4];
-        skitter.setStateCount (4);
-        skitter.timingMode = NestedTimingMode::freeRun;
-        skitter.parentDivision = 4;
-        skitter.setStateDemo (0, "Grid A", { { "Grid kit", "idmkit" } });
-        skitter.setStateDemo (1, "Grid B", { { "Grid edits", "idmfracture" } });
-        skitter.setStateDemo (2, "Grid C", { { "Grid glass", "idmglass" }, { "Grid wire", "idmwire" } });
-        skitter.setStateDemo (3, "Grid D", { { "Grid bass", "idmbass" } });
-        skitter.rules = { { 0, 1, 1.0f }, { 1, 1, 2.0f }, { 1, 2, 1.0f }, { 2, 3, 0.8f }, { 2, 0, 0.4f }, { 3, 0, 1.0f } };
-        skitter.setAllLaneVolumes (0.36f);
-
-        childMachines[6] = std::make_unique<MachineModel> (machineId + "_choir_child", lanePrefix + "choir-");
-        auto& choir = *childMachines[6];
-        choir.setStateCount (4);
-        choir.timingMode = NestedTimingMode::followParent;
-        choir.parentDivision = 3;
-        choir.setStateDemo (0, "Harm A", { { "Harm stabs", "idmstabs" }, { "Harm glass", "idmglass" } });
-        choir.setStateDemo (1, "Harm B", { { "Folding stabs", "idmstabs" } });
-        choir.setStateDemo (2, "Harm C", { { "Quiet wire", "idmwire" }, { "Tiny kit", "idmkit" } });
-        choir.setStateDemo (3, "Harm D", { { "Glass return", "idmglass" } });
-        choir.rules = { { 0, 0, 3.0f }, { 0, 1, 1.0f }, { 1, 2, 1.0f }, { 2, 2, 2.0f }, { 2, 3, 1.0f }, { 3, 0, 1.0f } };
-        choir.setAllLaneVolumes (0.34f);
+        nodeOffsets = {
+            { -150.0f,  -20.0f },
+            { -250.0f, -155.0f },
+            {  -65.0f, -210.0f },
+            {  170.0f, -165.0f },
+            {  300.0f,    5.0f },
+            {  190.0f,  180.0f },
+            {  -40.0f,  225.0f },
+            { -265.0f,  150.0f },
+            { -395.0f,   -5.0f },
+            {  420.0f, -105.0f }
+        };
 
         selectedState = 0;
         selectedLane = 0;
+    }
+
+    void configureBlankRoot()
+    {
+        setStateCount (1);
+        childMachines.clear();
+        childMachines.resize (states.size());
+        nodeOffsets.clear();
+        nodeOffsets.resize (states.size());
+
+        auto& s = state (0);
+        s.name = "State 1";
+        s.tempoBpm = 120.0;
+        s.beatsPerBar = 4;
+        s.beatUnit = 4;
+        s.arrangementBars = 4;
+        s.lanes.clear();
+        s.lanes.push_back ({ makeLaneId (0, 0), "Lane 1", {} });
+
+        rules = { { 0, 0, 1.0f } };
+        selectedState = 0;
+        selectedLane = 0;
+        entryState = 0;
     }
 
     void configureDefaultChildDemo()

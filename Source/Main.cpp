@@ -4453,6 +4453,154 @@ public:
     }
 };
 
+class WelcomePanel final : public juce::Component
+{
+public:
+    WelcomePanel()
+    {
+        addAndMakeVisible (title);
+        addAndMakeVisible (subtitle);
+        addAndMakeVisible (newProjectButton);
+        addAndMakeVisible (openProjectButton);
+        addAndMakeVisible (openDemoButton);
+        addAndMakeVisible (settingsButton);
+        addAndMakeVisible (dismissButton);
+        addAndMakeVisible (recentTitle);
+
+        title.setText ("wf::", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (30.0f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, ink());
+        title.setJustificationType (juce::Justification::centredLeft);
+
+        subtitle.setText ("Start a machine, open a project, or load a demo.", juce::dontSendNotification);
+        subtitle.setFont (juce::FontOptions (13.5f));
+        subtitle.setColour (juce::Label::textColourId, mutedInk());
+        subtitle.setJustificationType (juce::Justification::centredLeft);
+
+        recentTitle.setText ("Recent projects", juce::dontSendNotification);
+        recentTitle.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        recentTitle.setColour (juce::Label::textColourId, mutedInk());
+        recentTitle.setJustificationType (juce::Justification::centredLeft);
+
+        newProjectButton.setButtonText ("New Project");
+        openProjectButton.setButtonText ("Open Project");
+        openDemoButton.setButtonText ("Open Demo");
+        settingsButton.setButtonText ("Audio Settings");
+        dismissButton.setButtonText ("Close");
+
+        newProjectButton.onClick = [this] { if (onNewProject) onNewProject(); };
+        openProjectButton.onClick = [this] { if (onOpenProject) onOpenProject(); };
+        openDemoButton.onClick = [this] { if (onOpenDemo) onOpenDemo(); };
+        settingsButton.onClick = [this] { if (onSettings) onSettings(); };
+        dismissButton.onClick = [this] { if (onDismiss) onDismiss(); };
+
+        for (int i = 0; i < static_cast<int> (recentButtons.size()); ++i)
+        {
+            auto& button = recentButtons[static_cast<size_t> (i)];
+            addAndMakeVisible (button);
+            button.onClick = [this, i] { if (onRecentProject) onRecentProject (i); };
+        }
+    }
+
+    void setRecentProjects (const juce::StringArray& paths)
+    {
+        recentPaths = paths;
+        const auto count = juce::jmin (static_cast<int> (recentButtons.size()), recentPaths.size());
+        for (int i = 0; i < static_cast<int> (recentButtons.size()); ++i)
+        {
+            auto& button = recentButtons[static_cast<size_t> (i)];
+            button.setVisible (i < count);
+            if (i < count)
+                button.setButtonText (juce::File (recentPaths[i]).getFileName());
+        }
+
+        recentTitle.setVisible (count > 0);
+        resized();
+    }
+
+    juce::String recentProjectPath (int index) const
+    {
+        return juce::isPositiveAndBelow (index, recentPaths.size()) ? recentPaths[index] : juce::String();
+    }
+
+    std::function<void()> onNewProject;
+    std::function<void()> onOpenProject;
+    std::function<void()> onOpenDemo;
+    std::function<void()> onSettings;
+    std::function<void()> onDismiss;
+    std::function<void(int)> onRecentProject;
+
+private:
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.50f));
+
+        auto panel = panelBounds().toFloat();
+        juce::ColourGradient bg (panelFill().brighter (0.04f), panel.getTopLeft(),
+                                 backgroundBottom().brighter (0.05f), panel.getBottomRight(), false);
+        g.setGradientFill (bg);
+        g.fillRoundedRectangle (panel, 8.0f);
+
+        g.setColour (hairline().withAlpha (0.42f));
+        g.drawRoundedRectangle (panel, 8.0f, 1.0f);
+
+        auto strip = panel.removeFromTop (3.0f).reduced (1.0f, 0.0f);
+        juce::ColourGradient rainbow (graphColour (0).withAlpha (0.85f), strip.getTopLeft(),
+                                      graphColour (5).withAlpha (0.85f), strip.getTopRight(), false);
+        rainbow.addColour (0.25, graphColour (2).withAlpha (0.85f));
+        rainbow.addColour (0.50, graphColour (4).withAlpha (0.85f));
+        rainbow.addColour (0.75, graphColour (7).withAlpha (0.85f));
+        g.setGradientFill (rainbow);
+        g.fillRect (strip);
+    }
+
+    void resized() override
+    {
+        auto panel = panelBounds().reduced (26, 24);
+        auto heading = panel.removeFromTop (64);
+        title.setBounds (heading.removeFromTop (34));
+        subtitle.setBounds (heading.removeFromTop (24));
+
+        panel.removeFromTop (10);
+        auto actions = panel.removeFromTop (84);
+        auto topActions = actions.removeFromTop (40);
+        newProjectButton.setBounds (topActions.removeFromLeft (150).reduced (0, 2));
+        topActions.removeFromLeft (8);
+        openProjectButton.setBounds (topActions.removeFromLeft (150).reduced (0, 2));
+        topActions.removeFromLeft (8);
+        openDemoButton.setBounds (topActions.removeFromLeft (126).reduced (0, 2));
+
+        auto secondActions = actions.removeFromTop (40);
+        settingsButton.setBounds (secondActions.removeFromLeft (150).reduced (0, 2));
+        secondActions.removeFromLeft (8);
+        dismissButton.setBounds (secondActions.removeFromLeft (126).reduced (0, 2));
+
+        panel.removeFromTop (12);
+        recentTitle.setBounds (panel.removeFromTop (24));
+        for (auto& button : recentButtons)
+            button.setBounds (panel.removeFromTop (34).reduced (0, 3));
+    }
+
+    juce::Rectangle<int> panelBounds() const
+    {
+        auto bounds = getLocalBounds();
+        const auto width = juce::jmin (560, bounds.getWidth() - 48);
+        const auto height = juce::jmin (370, bounds.getHeight() - 48);
+        return juce::Rectangle<int> (width, height).withCentre (bounds.getCentre());
+    }
+
+    juce::Label title;
+    juce::Label subtitle;
+    juce::Label recentTitle;
+    juce::TextButton newProjectButton;
+    juce::TextButton openProjectButton;
+    juce::TextButton openDemoButton;
+    juce::TextButton settingsButton;
+    juce::TextButton dismissButton;
+    std::array<juce::TextButton, 4> recentButtons;
+    juce::StringArray recentPaths;
+};
+
 class MainComponent final : public juce::Component,
                             private juce::CodeDocument::Listener,
                             private juce::OSCReceiver,
@@ -4460,7 +4608,7 @@ class MainComponent final : public juce::Component,
                             private juce::Timer
 {
 public:
-    MainComponent() : graph (machine), rules (machine), scriptEditor (codeDocument, &scTokeniser)
+    MainComponent() : machine ("root", "", false), graph (machine), rules (machine), scriptEditor (codeDocument, &scTokeniser)
     {
         setSize (1180, 760);
         audioDeviceManager.initialise (0, 2, nullptr, true);
@@ -4538,6 +4686,7 @@ public:
         addAndMakeVisible (addChildMachineButton);
         addAndMakeVisible (removeChildMachineButton);
         addAndMakeVisible (playButton);
+        addChildComponent (welcomePanel);
 
         title.setText ("wf::", juce::dontSendNotification);
         title.setFont (juce::FontOptions (24.0f, juce::Font::bold));
@@ -5178,6 +5327,34 @@ public:
             refreshControls();
         };
 
+        welcomePanel.onNewProject = [this]
+        {
+            hideWelcomePanel();
+            newProject();
+        };
+        welcomePanel.onOpenProject = [this]
+        {
+            chooseProjectToLoad();
+        };
+        welcomePanel.onOpenDemo = [this]
+        {
+            openWelcomeDemo();
+        };
+        welcomePanel.onSettings = [this]
+        {
+            showSettings();
+        };
+        welcomePanel.onDismiss = [this]
+        {
+            hideWelcomePanel();
+        };
+        welcomePanel.onRecentProject = [this] (int index)
+        {
+            const auto path = welcomePanel.recentProjectPath (index);
+            if (path.isNotEmpty())
+                loadProjectFromFile (juce::File (path));
+        };
+
         graph.onStateChosen = [this] (int)
         {
             inspectedMachine = &currentMachine();
@@ -5280,6 +5457,7 @@ public:
         refreshControls();
         restoreLastProject();
         resetUndoHistory();
+        showWelcomePanel();
         setWantsKeyboardFocus (true);
         startTimerHz (30);
         juce::Timer::callAfterDelay (350, [safeThis = juce::Component::SafePointer<MainComponent> (this)]
@@ -5314,7 +5492,7 @@ public:
         requestAudioProjectReset();
         runButton.setButtonText ("Run");
 
-        machine = MachineModel();
+        machine = MachineModel ("root", "", false);
         machineStack.clear();
         activeMachine = &machine;
         inspectedMachine = &machine;
@@ -5331,6 +5509,7 @@ public:
         saveProjectButton.setButtonText ("Save");
         updateProjectFileLabel();
         statusLabel.setText ("New project", juce::dontSendNotification);
+        hideWelcomePanel();
         resetUndoHistory();
         refreshControls();
     }
@@ -5338,6 +5517,35 @@ public:
     void loadProject()
     {
         chooseProjectToLoad();
+    }
+
+    void showWelcomePanel()
+    {
+        welcomePanel.setRecentProjects (recentProjects);
+        welcomePanel.setBounds (getLocalBounds());
+        welcomePanel.setVisible (true);
+        welcomePanel.toFront (false);
+    }
+
+    void hideWelcomePanel()
+    {
+        welcomePanel.setVisible (false);
+    }
+
+    void openWelcomeDemo()
+    {
+        auto demo = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                        .getChildFile ("radigue-expanded.markovfsm");
+        if (! demo.existsAsFile())
+            demo = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                       .getChildFile ("demo1.markovfsm");
+
+        if (demo.existsAsFile() && loadProjectFromFile (demo))
+            return;
+
+        hideWelcomePanel();
+        newProject();
+        statusLabel.setText ("Demo file not found", juce::dontSendNotification);
     }
 
     void saveCurrentProject()
@@ -5521,6 +5729,8 @@ public:
 
     void resized() override
     {
+        welcomePanel.setBounds (getLocalBounds());
+
         auto area = getLocalBounds().reduced (18);
         auto header = area.removeFromTop (46);
         auto headerInner = header.reduced (10, 7);
@@ -6329,7 +6539,7 @@ private:
         host.setMasterGain (static_cast<float> (masterGain));
     }
 
-    void restoreLastProject()
+    bool restoreLastProject()
     {
         loadAppState();
 
@@ -6340,8 +6550,13 @@ private:
             const auto loaded = loadProjectFromFile (autosave, false);
             loadingProjectInternally = false;
             if (loaded)
+            {
                 statusLabel.setText ("Restored last session", juce::dontSendNotification);
+                return true;
+            }
         }
+
+        return false;
     }
 
     juce::File projectMediaFreezeDirectory (const juce::File& projectFile) const
@@ -6962,6 +7177,7 @@ private:
         dirtyProject = false;
         saveProjectButton.setButtonText ("Save");
         updateProjectFileLabel();
+        hideWelcomePanel();
         resetUndoHistory();
         return true;
     }
@@ -8721,6 +8937,7 @@ private:
     juce::TextButton addChildMachineButton;
     juce::TextButton removeChildMachineButton;
     juce::TextButton playButton;
+    WelcomePanel welcomePanel;
     juce::TextEditor logView;
     juce::String scLog;
     bool logDirty = false;
@@ -8837,6 +9054,7 @@ private:
         saveProjectAsItem,
         exportAudioItem,
         cancelExportItem,
+        welcomeItem,
         settingsItem,
         aboutItem
     };
@@ -8863,6 +9081,7 @@ private:
             menu.addItem (exportAudioItem, "Export Audio...");
             menu.addItem (cancelExportItem, "Cancel Export");
             menu.addSeparator();
+            menu.addItem (welcomeItem, "Welcome");
             menu.addItem (settingsItem, "Settings...");
             menu.addSeparator();
             menu.addItem (aboutItem, "About wf::");
@@ -8891,6 +9110,7 @@ private:
             case saveProjectAsItem:  main->saveProjectAs(); break;
             case exportAudioItem:    main->exportAudio(); break;
             case cancelExportItem:   main->cancelAudioExport(); break;
+            case welcomeItem:        main->showWelcomePanel(); break;
             case settingsItem:       main->showSettings(); break;
             case aboutItem:          main->showAbout(); break;
             default: break;
