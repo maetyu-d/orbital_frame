@@ -23,6 +23,8 @@ build/wf_artefacts/Debug/wf.app
 
 Each state can contain one or more lanes. A lane is a live `.scd` script buffer. Use `Play` to run the selected lane, or `Run` / `Step` to play all lanes in the active state while the FSM advances through weighted transition rules.
 
+For copyable lane ideas, see the [SuperCollider lane catalogue](docs/supercollider-lane-catalogue.md).
+
 For tighter standalone audio-app behavior, the app keeps one persistent `sclang` bridge alive, boots the SuperCollider server once, and preloads lane programs. This avoids spawning a new language process for every lane, while the JUCE transport keeps parent and nested FSM state changes deterministic.
 
 Use `Boot audio` before performing to start the bridge and preload every lane program without playing anything. When `Run` starts, the app also preloads all lanes before the first transition.
