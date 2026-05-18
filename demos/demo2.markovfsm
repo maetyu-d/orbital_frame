@@ -1,0 +1,1385 @@
+{
+  "format": "wf:: Project",
+  "version": 1,
+  "rate": 0.2,
+  "masterGain": 5.0,
+  "machine": {
+    "machineId": "root",
+    "lanePrefix": "",
+    "timingMode": "follow",
+    "parentDivision": 1,
+    "selectedState": 5,
+    "selectedLane": 0,
+    "entryState": 0,
+    "states": [
+      {
+        "name": "Breath",
+        "tempoBpm": 42.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 4,
+        "lanes": [
+          {
+            "id": "s0-l0",
+            "name": "Ground sine",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 42.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s0-l1",
+            "name": "Low beating",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 52.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s0-l2",
+            "name": "Room air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(232, 872);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([146, 148] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "First partial",
+        "tempoBpm": 44.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 4,
+        "lanes": [
+          {
+            "id": "s1-l0",
+            "name": "Fundamental",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 44.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s1-l1",
+            "name": "Upper beat",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 54.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s1-l2",
+            "name": "Narrow air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(237, 877);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([151, 153] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "Interference",
+        "tempoBpm": 40.0,
+        "beatsPerBar": 5,
+        "beatUnit": 4,
+        "arrangementBars": 5,
+        "lanes": [
+          {
+            "id": "s2-l0",
+            "name": "Beating pair",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 53.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s2-l1",
+            "name": "Formant veil",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 61.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (1 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s2-l2",
+            "name": "Undertone",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 40.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.479999989271164,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s2-l3",
+            "name": "Air thread",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(249, 889);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([163, 165] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ],
+        "child": {
+          "machineId": "root_interference_child",
+          "lanePrefix": "interference-",
+          "timingMode": "follow",
+          "parentDivision": 4,
+          "selectedState": 0,
+          "selectedLane": 0,
+          "entryState": 0,
+          "states": [
+            {
+              "name": "Left drift",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "interference-s0-l0",
+                  "name": "Left pair",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 49.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "interference-s0-l1",
+                  "name": "Left air",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(225, 865);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([139, 141] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Right drift",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "interference-s1-l0",
+                  "name": "Right pair",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 51.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "interference-s1-l1",
+                  "name": "Right formant",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 59.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (1 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ],
+              "child": {
+                "machineId": "root_interference_child_slow_beads",
+                "lanePrefix": "interference-beads-",
+                "timingMode": "free",
+                "parentDivision": 6,
+                "selectedState": 0,
+                "selectedLane": 0,
+                "entryState": 0,
+                "states": [
+                  {
+                    "name": "Bead A",
+                    "tempoBpm": 120.0,
+                    "beatsPerBar": 4,
+                    "beatUnit": 4,
+                    "arrangementBars": 1,
+                    "lanes": [
+                      {
+                        "id": "interference-beads-s0-l0",
+                        "name": "Bead tone",
+                        "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 49.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                        "volume": 0.259999990463257,
+                        "gain": 1.0,
+                        "pan": 0.0,
+                        "enabled": true,
+                        "muted": false,
+                        "solo": false,
+                        "frozen": false,
+                        "freezeStale": false,
+                        "frozenAudioPath": ""
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Bead B",
+                    "tempoBpm": 120.0,
+                    "beatsPerBar": 4,
+                    "beatUnit": 4,
+                    "arrangementBars": 1,
+                    "lanes": [
+                      {
+                        "id": "interference-beads-s1-l0",
+                        "name": "Bead air",
+                        "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(223, 863);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([137, 139] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                        "volume": 0.259999990463257,
+                        "gain": 1.0,
+                        "pan": 0.0,
+                        "enabled": true,
+                        "muted": false,
+                        "solo": false,
+                        "frozen": false,
+                        "freezeStale": false,
+                        "frozenAudioPath": ""
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Bead C",
+                    "tempoBpm": 120.0,
+                    "beatsPerBar": 4,
+                    "beatUnit": 4,
+                    "arrangementBars": 1,
+                    "lanes": [
+                      {
+                        "id": "interference-beads-s2-l0",
+                        "name": "Bead formant",
+                        "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 58.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (0 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+                        "volume": 0.259999990463257,
+                        "gain": 1.0,
+                        "pan": 0.0,
+                        "enabled": true,
+                        "muted": false,
+                        "solo": false,
+                        "frozen": false,
+                        "freezeStale": false,
+                        "frozenAudioPath": ""
+                      }
+                    ]
+                  }
+                ],
+                "rules": [
+                  {
+                    "from": 0,
+                    "to": 0,
+                    "weight": 4.0
+                  },
+                  {
+                    "from": 0,
+                    "to": 1,
+                    "weight": 1.0
+                  },
+                  {
+                    "from": 1,
+                    "to": 1,
+                    "weight": 4.0
+                  },
+                  {
+                    "from": 1,
+                    "to": 2,
+                    "weight": 1.0
+                  },
+                  {
+                    "from": 2,
+                    "to": 0,
+                    "weight": 1.0
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Low fold",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "interference-s2-l0",
+                  "name": "Fold low",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 34.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "interference-s2-l1",
+                  "name": "Fold core",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 49.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Still band",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "interference-s3-l0",
+                  "name": "Band formant",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 60.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (0 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "interference-s3-l1",
+                  "name": "Band air",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(240, 880);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([154, 156] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Return beat",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "interference-s4-l0",
+                  "name": "Return pair",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 57.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.360000014305115,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "from": 0,
+              "to": 0,
+              "weight": 3.0
+            },
+            {
+              "from": 0,
+              "to": 1,
+              "weight": 1.0
+            },
+            {
+              "from": 1,
+              "to": 1,
+              "weight": 3.0
+            },
+            {
+              "from": 1,
+              "to": 2,
+              "weight": 0.800000011920929
+            },
+            {
+              "from": 1,
+              "to": 3,
+              "weight": 0.5
+            },
+            {
+              "from": 2,
+              "to": 4,
+              "weight": 1.0
+            },
+            {
+              "from": 3,
+              "to": 4,
+              "weight": 1.0
+            },
+            {
+              "from": 4,
+              "to": 0,
+              "weight": 1.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "Long veil",
+        "tempoBpm": 38.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 6,
+        "lanes": [
+          {
+            "id": "s3-l0",
+            "name": "Veil body",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 48.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s3-l1",
+            "name": "Slow formant",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 63.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (1 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s3-l2",
+            "name": "Dust band",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(247, 887);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([161, 163] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "Narrowing",
+        "tempoBpm": 46.0,
+        "beatsPerBar": 3,
+        "beatUnit": 4,
+        "arrangementBars": 4,
+        "lanes": [
+          {
+            "id": "s4-l0",
+            "name": "Close tone",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 57.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s4-l1",
+            "name": "Filter line",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 65.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (1 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s4-l2",
+            "name": "Low cloud",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 44.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.479999989271164,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "Bloom",
+        "tempoBpm": 42.0,
+        "beatsPerBar": 6,
+        "beatUnit": 4,
+        "arrangementBars": 6,
+        "lanes": [
+          {
+            "id": "s5-l0",
+            "name": "Bloom core",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 52.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s5-l1",
+            "name": "Wide harmonic",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 24);\n    var root = 60.midicps;\n    var chord = root * [0.5, 1, 1.25, 1.5, 2, 2.5];\n    var wander = LFNoise1.kr([0.004, 0.006, 0.008, 0.011, 0.013, 0.017]).range(0.997, 1.003);\n    var amps = [0.20, 0.16, 0.11, 0.09, 0.055, 0.035] * SinOsc.kr([0.015, 0.019, 0.023, 0.029, 0.034, 0.041]).range(0.52, 1.0);\n    var bank = SinOsc.ar(chord * wander, 0, amps);\n    var sig = Splay.ar(bank, 0.52);\n    sig = RLPF.ar(sig, LFNoise1.kr(0.010).range(640, 1650), 0.38);\n    sig = sig + (CombC.ar(sig, 0.9, [0.47, 0.61], 2.8) * 0.045);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 2400), 28)), 0.18) * active * vol * 0.30;\n}.play;\n)\n",
+            "volume": 0.560000002384186,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s5-l2",
+            "name": "Bloom beat",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 65.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s5-l3",
+            "name": "Bloom air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(264, 904);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([178, 180] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s5-l4",
+            "name": "Soft formant",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 76.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (4 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ],
+        "child": {
+          "machineId": "root_bloom_child",
+          "lanePrefix": "bloom-",
+          "timingMode": "follow",
+          "parentDivision": 5,
+          "selectedState": 0,
+          "selectedLane": 0,
+          "entryState": 0,
+          "states": [
+            {
+              "name": "Opening",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "bloom-s0-l0",
+                  "name": "Opening core",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 42.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "bloom-s0-l1",
+                  "name": "Opening air",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(225, 865);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([139, 141] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Widen",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "bloom-s1-l0",
+                  "name": "Widen pair",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 51.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "bloom-s1-l1",
+                  "name": "Widen formant",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 59.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (1 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Held light",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "bloom-s2-l0",
+                  "name": "Held core",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 46.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "bloom-s2-l1",
+                  "name": "Held harmonic",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 24);\n    var root = 54.midicps;\n    var chord = root * [0.5, 1, 1.25, 1.5, 2, 2.5];\n    var wander = LFNoise1.kr([0.004, 0.006, 0.008, 0.011, 0.013, 0.017]).range(0.997, 1.003);\n    var amps = [0.20, 0.16, 0.11, 0.09, 0.055, 0.035] * SinOsc.kr([0.015, 0.019, 0.023, 0.029, 0.034, 0.041]).range(0.52, 1.0);\n    var bank = SinOsc.ar(chord * wander, 0, amps);\n    var sig = Splay.ar(bank, 0.52);\n    sig = RLPF.ar(sig, LFNoise1.kr(0.010).range(640, 1650), 0.38);\n    sig = sig + (CombC.ar(sig, 0.9, [0.47, 0.61], 2.8) * 0.045);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 2400), 28)), 0.18) * active * vol * 0.30;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "bloom-s2-l2",
+                  "name": "Held air",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(242, 882);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([156, 158] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Settle",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "bloom-s3-l0",
+                  "name": "Settle low",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 36.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                },
+                {
+                  "id": "bloom-s3-l1",
+                  "name": "Settle beat",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 58.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.340000003576279,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "from": 0,
+              "to": 0,
+              "weight": 4.0
+            },
+            {
+              "from": 0,
+              "to": 1,
+              "weight": 1.0
+            },
+            {
+              "from": 1,
+              "to": 1,
+              "weight": 4.0
+            },
+            {
+              "from": 1,
+              "to": 2,
+              "weight": 1.0
+            },
+            {
+              "from": 2,
+              "to": 2,
+              "weight": 5.0
+            },
+            {
+              "from": 2,
+              "to": 3,
+              "weight": 1.0
+            },
+            {
+              "from": 3,
+              "to": 0,
+              "weight": 1.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "Still centre",
+        "tempoBpm": 36.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 5,
+        "lanes": [
+          {
+            "id": "s6-l0",
+            "name": "Centre tone",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 54.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s6-l1",
+            "name": "Harmonic field",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 24);\n    var root = 62.midicps;\n    var chord = root * [0.5, 1, 1.25, 1.5, 2, 2.5];\n    var wander = LFNoise1.kr([0.004, 0.006, 0.008, 0.011, 0.013, 0.017]).range(0.997, 1.003);\n    var amps = [0.20, 0.16, 0.11, 0.09, 0.055, 0.035] * SinOsc.kr([0.015, 0.019, 0.023, 0.029, 0.034, 0.041]).range(0.52, 1.0);\n    var bank = SinOsc.ar(chord * wander, 0, amps);\n    var sig = Splay.ar(bank, 0.52);\n    sig = RLPF.ar(sig, LFNoise1.kr(0.010).range(640, 1650), 0.38);\n    sig = sig + (CombC.ar(sig, 0.9, [0.47, 0.61], 2.8) * 0.045);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 2400), 28)), 0.18) * active * vol * 0.30;\n}.play;\n)\n",
+            "volume": 0.560000002384186,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s6-l2",
+            "name": "Sub breath",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 48.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.479999989271164,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s6-l3",
+            "name": "Almost air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(269, 909);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([183, 185] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "Low cloud",
+        "tempoBpm": 39.0,
+        "beatsPerBar": 5,
+        "beatUnit": 4,
+        "arrangementBars": 5,
+        "lanes": [
+          {
+            "id": "s7-l0",
+            "name": "Deep partial",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 44.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.479999989271164,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s7-l1",
+            "name": "Cloud beating",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 66.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s7-l2",
+            "name": "Muted formant",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 74.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (2 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      },
+      {
+        "name": "Bright thread",
+        "tempoBpm": 48.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 4,
+        "lanes": [
+          {
+            "id": "s8-l0",
+            "name": "Thin harmonic",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 70.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (0 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.5,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s8-l1",
+            "name": "Thread beat",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 68.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+            "volume": 0.540000021457672,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s8-l2",
+            "name": "High air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(272, 912);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([186, 188] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ],
+        "child": {
+          "machineId": "root_thread_child",
+          "lanePrefix": "thread-",
+          "timingMode": "free",
+          "parentDivision": 3,
+          "selectedState": 0,
+          "selectedLane": 0,
+          "entryState": 0,
+          "states": [
+            {
+              "name": "Harmonic",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "thread-s0-l0",
+                  "name": "Harmonic formant",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 20);\n    var root = 54.midicps;\n    var source = SinOsc.ar(root * [0.25, 0.5, 1.0], 0, [0.18, 0.12, 0.06]).sum;\n    var sweep = SinOsc.kr(0.009 + (0 * 0.002)).range(260, 1180);\n    var sig = Resonz.ar(source + PinkNoise.ar(0.018), [sweep, sweep * 1.43], [0.18, 0.11]).sum;\n    sig = Splay.ar([sig, DelayC.ar(sig, 0.08, 0.037)], 0.28);\n    Limiter.ar(LeakDC.ar(HPF.ar(LPF.ar(sig, 1800), 35)), 0.14) * active * vol * 0.22;\n}.play;\n)\n",
+                  "volume": 0.280000001192093,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Dust",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "thread-s1-l0",
+                  "name": "Dust air",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(223, 863);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([137, 139] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+                  "volume": 0.280000001192093,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            },
+            {
+              "name": "Beat",
+              "tempoBpm": 120.0,
+              "beatsPerBar": 4,
+              "beatUnit": 4,
+              "arrangementBars": 1,
+              "lanes": [
+                {
+                  "id": "thread-s2-l0",
+                  "name": "Fine beat",
+                  "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 18);\n    var root = 53.midicps;\n    var offsets = [0, 0.07, -0.11, 0.19] + LFNoise1.kr(0.01 ! 4).range(-0.025, 0.025);\n    var tones = SinOsc.ar(root + offsets, 0, [0.18, 0.14, 0.12, 0.09]);\n    var slow = SinOsc.kr([0.021, 0.034]).range(0.35, 1.0);\n    var sig = Splay.ar(tones, 0.34) * slow;\n    sig = BLowPass4.ar(sig, LFNoise1.kr(0.014).range(520, 1550), 0.62);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 30)), 0.16) * active * vol * 0.24;\n}.play;\n)\n",
+                  "volume": 0.280000001192093,
+                  "gain": 1.0,
+                  "pan": 0.0,
+                  "enabled": true,
+                  "muted": false,
+                  "solo": false,
+                  "frozen": false,
+                  "freezeStale": false,
+                  "frozenAudioPath": ""
+                }
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "from": 0,
+              "to": 0,
+              "weight": 5.0
+            },
+            {
+              "from": 0,
+              "to": 1,
+              "weight": 1.0
+            },
+            {
+              "from": 1,
+              "to": 1,
+              "weight": 4.0
+            },
+            {
+              "from": 1,
+              "to": 2,
+              "weight": 1.0
+            },
+            {
+              "from": 2,
+              "to": 0,
+              "weight": 1.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "Return",
+        "tempoBpm": 41.0,
+        "beatsPerBar": 4,
+        "beatUnit": 4,
+        "arrangementBars": 6,
+        "lanes": [
+          {
+            "id": "s9-l0",
+            "name": "Return core",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 14);\n    var root = 60.midicps;\n    var drift = LFNoise1.kr([0.006, 0.009, 0.013, 0.017]).range(-0.18, 0.18);\n    var partials = SinOsc.ar((root * [0.5, 1, 1.5, 2.01]) + drift, 0, [0.30, 0.22, 0.11, 0.055]);\n    var body = Splay.ar(partials, 0.26);\n    var shade = LPF.ar(body, LFNoise1.kr(0.018).range(420, 1250));\n    Limiter.ar(LeakDC.ar(HPF.ar(shade, 22)), 0.20) * active * vol * 0.28;\n}.play;\n)\n",
+            "volume": 0.620000004768372,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s9-l1",
+            "name": "Return low",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 22);\n    var root = 51.midicps;\n    var bend = LFNoise1.kr(0.008).range(-0.12, 0.12);\n    var sig = SinOsc.ar((root * [0.5, 1.0]) + bend, 0, [0.20, 0.12]);\n    sig = LPF.ar(Splay.ar(sig, 0.12), LFNoise1.kr(0.011).range(180, 520));\n    sig = Compander.ar(sig, sig, 0.12, 1, 0.65, 0.02, 0.18);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 26)), 0.15) * active * vol * 0.22;\n}.play;\n)\n",
+            "volume": 0.479999989271164,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          },
+          {
+            "id": "s9-l2",
+            "name": "Returning air",
+            "script": "(\n{ |gate=1, fade=0.12, vol=1|\n    var active = Lag.kr(gate, 16);\n    var centre = LFNoise1.kr(0.012).range(277, 917);\n    var air = BPF.ar(PinkNoise.ar(0.10 ! 2), centre, 0.22);\n    var tone = SinOsc.ar([191, 193] * LFNoise1.kr(0.006).range(0.998, 1.002), 0, 0.018);\n    var sig = LPF.ar(air + tone, 2100);\n    Limiter.ar(LeakDC.ar(HPF.ar(sig, 70)), 0.12) * active * vol * 0.20;\n}.play;\n)\n",
+            "volume": 0.419999986886978,
+            "gain": 1.0,
+            "pan": 0.0,
+            "enabled": true,
+            "muted": false,
+            "solo": false,
+            "frozen": false,
+            "freezeStale": false,
+            "frozenAudioPath": ""
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": 0,
+        "to": 0,
+        "weight": 5.0
+      },
+      {
+        "from": 0,
+        "to": 1,
+        "weight": 1.0
+      },
+      {
+        "from": 1,
+        "to": 1,
+        "weight": 4.0
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "weight": 1.0
+      },
+      {
+        "from": 2,
+        "to": 2,
+        "weight": 6.0
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "weight": 1.0
+      },
+      {
+        "from": 2,
+        "to": 5,
+        "weight": 0.349999994039536
+      },
+      {
+        "from": 3,
+        "to": 3,
+        "weight": 7.0
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "weight": 1.0
+      },
+      {
+        "from": 4,
+        "to": 4,
+        "weight": 4.0
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "weight": 1.0
+      },
+      {
+        "from": 5,
+        "to": 5,
+        "weight": 8.0
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "weight": 1.0
+      },
+      {
+        "from": 5,
+        "to": 8,
+        "weight": 0.449999988079071
+      },
+      {
+        "from": 6,
+        "to": 6,
+        "weight": 7.0
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "weight": 1.0
+      },
+      {
+        "from": 7,
+        "to": 7,
+        "weight": 5.0
+      },
+      {
+        "from": 7,
+        "to": 8,
+        "weight": 1.0
+      },
+      {
+        "from": 8,
+        "to": 8,
+        "weight": 4.0
+      },
+      {
+        "from": 8,
+        "to": 9,
+        "weight": 1.0
+      },
+      {
+        "from": 9,
+        "to": 9,
+        "weight": 6.0
+      },
+      {
+        "from": 9,
+        "to": 0,
+        "weight": 1.0
+      }
+    ],
+    "nodeOffsets": [
+      {
+        "x": -278.56,
+        "y": 203.72
+      },
+      {
+        "x": -486.19,
+        "y": 97.87
+      },
+      {
+        "x": -541.26,
+        "y": -82.0
+      },
+      {
+        "x": -497.93,
+        "y": -166.97
+      },
+      {
+        "x": -19.79,
+        "y": -50.17
+      },
+      {
+        "x": 377.04,
+        "y": -103.03
+      },
+      {
+        "x": 566.17,
+        "y": 19.18
+      },
+      {
+        "x": 485.83,
+        "y": 103.13
+      },
+      {
+        "x": 948.33,
+        "y": 44.88
+      },
+      {
+        "x": 649.33,
+        "y": 167.66
+      }
+    ]
+  }
+}

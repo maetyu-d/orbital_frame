@@ -13,6 +13,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace
 {
@@ -5487,9 +5488,11 @@ public:
     {
         fsmRunning = false;
         stopTransport();
-        host.pauseMachine();
-        host.stopAll (machine);
         requestAudioProjectReset();
+        prepareQueued = false;
+        prepareQueuedStartAfter = false;
+        host.pauseMachine();
+        host.panic (machine);
         runButton.setButtonText ("Run");
 
         machine = MachineModel ("root", "", false);
@@ -6908,7 +6911,7 @@ private:
         if (! machineVar.isObject())
             return false;
 
-        MachineModel loadedMachine;
+        MachineModel loadedMachine ("root", "", false);
         if (! machineFromProjectVar (loadedMachine, machineVar))
             return false;
 
@@ -6916,9 +6919,11 @@ private:
 
         fsmRunning = false;
         stopTransport();
-        host.pauseMachine();
-        host.stopAll (machine);
         requestAudioProjectReset();
+        prepareQueued = false;
+        prepareQueuedStartAfter = false;
+        host.pauseMachine();
+        host.panic (machine);
         runButton.setButtonText ("Run");
 
         machine = std::move (loadedMachine);
@@ -7127,7 +7132,7 @@ private:
         if (! machineVar.isObject())
             return false;
 
-        MachineModel loadedMachine;
+        MachineModel loadedMachine ("root", "", false);
         {
             const juce::ScopedValueSetter<juce::File> mediaBase (loadingProjectDirectory, file.getParentDirectory());
             if (! machineFromProjectVar (loadedMachine, machineVar))
@@ -7136,9 +7141,11 @@ private:
 
         fsmRunning = false;
         stopTransport();
-        host.pauseMachine();
-        host.stopAll (machine);
         requestAudioProjectReset();
+        prepareQueued = false;
+        prepareQueuedStartAfter = false;
+        host.pauseMachine();
+        host.panic (machine);
         runButton.setButtonText ("Run");
         machine = std::move (loadedMachine);
 
@@ -7855,6 +7862,7 @@ private:
     std::vector<LaneSnapshot> makeLaneSnapshots() const
     {
         std::vector<LaneSnapshot> lanes;
+        lanes.reserve (64);
         collectLaneSnapshots (machine, lanes);
 
         return lanes;
@@ -7874,22 +7882,24 @@ private:
 
     void markPreparedLanes (const std::vector<LaneSnapshot>& lanes, int bridge)
     {
-        markPreparedLanesInMachine (machine, lanes, bridge);
+        std::unordered_set<std::string> preparedIds;
+        preparedIds.reserve (lanes.size());
+        for (const auto& lane : lanes)
+            preparedIds.insert (lane.id.toStdString());
+
+        markPreparedLanesInMachine (machine, preparedIds, bridge);
     }
 
-    void markPreparedLanesInMachine (MachineModel& model, const std::vector<LaneSnapshot>& lanes, int bridge)
+    void markPreparedLanesInMachine (MachineModel& model, const std::unordered_set<std::string>& preparedIds, int bridge)
     {
-        for (const auto& snapshot : lanes)
+        for (auto& state : model.states)
         {
-            for (auto& state : model.states)
-            {
-                for (auto& lane : state.lanes)
-                    if (lane.id == snapshot.id)
-                        lane.preparedBridge = bridge;
+            for (auto& lane : state.lanes)
+                if (preparedIds.find (lane.id.toStdString()) != preparedIds.end())
+                    lane.preparedBridge = bridge;
 
-                if (auto* child = model.childMachine (state.index))
-                    markPreparedLanesInMachine (*child, lanes, bridge);
-            }
+            if (auto* child = model.childMachine (state.index))
+                markPreparedLanesInMachine (*child, preparedIds, bridge);
         }
     }
 
@@ -8211,30 +8221,35 @@ private:
 
     int chooseNextState (const MachineModel& model) const
     {
-        std::vector<Rule> candidates;
         float total = 0.0f;
+        auto lastCandidate = model.selectedState;
 
         for (const auto& rule : model.rules)
         {
-            if (rule.from == model.selectedState)
+            const auto weight = juce::jmax (0.0f, rule.weight);
+            if (rule.from == model.selectedState && weight > 0.0f)
             {
-                candidates.push_back (rule);
-                total += juce::jmax (0.0f, rule.weight);
+                total += weight;
+                lastCandidate = rule.to;
             }
         }
 
-        if (candidates.empty() || total <= 0.0f)
+        if (total <= 0.0f)
             return (model.selectedState + 1) % model.getStateCount();
 
         auto pick = juce::Random::getSystemRandom().nextFloat() * total;
-        for (const auto& rule : candidates)
+        for (const auto& rule : model.rules)
         {
-            pick -= juce::jmax (0.0f, rule.weight);
-            if (pick <= 0.0f)
-                return rule.to;
+            const auto weight = juce::jmax (0.0f, rule.weight);
+            if (rule.from == model.selectedState && weight > 0.0f)
+            {
+                pick -= weight;
+                if (pick <= 0.0f)
+                    return rule.to;
+            }
         }
 
-        return candidates.back().to;
+        return lastCandidate;
     }
 
     void startMachine (MachineModel& model, int stateIndex)
