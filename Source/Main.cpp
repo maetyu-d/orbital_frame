@@ -400,15 +400,15 @@ private:
         stateRadius = juce::jmap (static_cast<float> (count), 1.0f, static_cast<float> (maxStateCount), 54.0f, 34.0f);
         stateRadius = juce::jlimit (34.0f, 54.0f, stateRadius);
 
-        const auto demoLayout = isRootDemoLayout();
-        const auto outerMargin = demoLayout ? stateRadius * 1.95f : getOuterNodeExtent() + 28.0f;
-        auto area = getLocalBounds().toFloat().reduced (outerMargin, demoLayout ? stateRadius * 1.45f : outerMargin * 0.78f);
+        const auto clockLayout = isRootClockLayout();
+        const auto outerMargin = clockLayout ? stateRadius * 1.75f : getOuterNodeExtent() + 28.0f;
+        auto area = getLocalBounds().toFloat().reduced (outerMargin, clockLayout ? stateRadius * 1.35f : outerMargin * 0.78f);
         const auto maxLayoutWidth = area.getHeight() * 4.25f;
-        if (! demoLayout && area.getWidth() > maxLayoutWidth)
+        if (! clockLayout && area.getWidth() > maxLayoutWidth)
             area = area.withSizeKeepingCentre (maxLayoutWidth, area.getHeight());
 
-        const auto demoApplied = applyDemoLayout (area);
-        if (! demoApplied)
+        const auto clockApplied = applyClockLayout (area);
+        if (! clockApplied)
         {
             auto centre = area.getCentre();
             auto rx = area.getWidth() * 0.50f;
@@ -423,7 +423,7 @@ private:
             }
         }
 
-        if (! demoApplied)
+        if (! clockApplied)
             relaxStatePositions (area);
         if (includeManualOffsets)
             applyManualNodeOffsets();
@@ -432,30 +432,38 @@ private:
             applyViewTransformToLayout();
     }
 
-    bool isRootDemoLayout() const
+    bool isRootClockLayout() const
     {
-        return machine->machineId == "root" && machine->getStateCount() == 6;
+        return machine->machineId == "root";
     }
 
-    bool applyDemoLayout (juce::Rectangle<float> area)
+    bool applyClockLayout (juce::Rectangle<float> area)
     {
-        if (! isRootDemoLayout())
+        if (! isRootClockLayout())
             return false;
 
-        static constexpr std::array<juce::Point<float>, 6> normalised {{
-            { 0.15f, 0.76f },
-            { 0.68f, 0.51f },
-            { 0.90f, 0.29f },
-            { 0.27f, 0.38f },
-            { 0.50f, 0.22f },
-            { 0.53f, 0.77f }
-        }};
+        const auto count = machine->getStateCount();
+        if (count <= 0)
+            return true;
 
-        for (int i = 0; i < 6; ++i)
+        const auto centre = area.getCentre();
+        if (count == 1)
         {
-            const auto p = normalised[static_cast<size_t> (i)];
-            statePositions[static_cast<size_t> (i)] = { area.getX() + p.x * area.getWidth(),
-                                                        area.getY() + p.y * area.getHeight() };
+            statePositions[0] = centre;
+            return true;
+        }
+
+        const auto available = juce::jmin (area.getWidth(), area.getHeight());
+        const auto angleStep = juce::MathConstants<float>::twoPi / static_cast<float> (count);
+        const auto spacingRadius = (stateRadius * 2.22f) / (2.0f * std::sin (angleStep * 0.5f));
+        const auto comfortableRadius = juce::jmax (spacingRadius, stateRadius * (count <= 6 ? 2.85f : 2.55f));
+        const auto ringRadius = juce::jmin (comfortableRadius, available * 0.42f);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto angle = angleStep * static_cast<float> (i) - juce::MathConstants<float>::halfPi;
+            statePositions[static_cast<size_t> (i)] = { centre.x + std::cos (angle) * ringRadius,
+                                                        centre.y + std::sin (angle) * ringRadius };
         }
 
         return true;
