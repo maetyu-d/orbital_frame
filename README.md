@@ -2,6 +2,16 @@
 
 A JUCE/C++ desktop app for performing with a finite-state machine whose states host live SuperCollider lanes.
 
+## Requires SuperCollider
+
+`wf::` uses SuperCollider for all live audio. Install SuperCollider before running the app:
+
+- macOS app path expected by default: `/Applications/SuperCollider.app`
+- `sclang` is auto-detected at `/Applications/SuperCollider.app/Contents/MacOS/sclang`
+- if SuperCollider is installed elsewhere, set the `sclang` path in `File > Settings`
+
+Download SuperCollider from [supercollider.github.io](https://supercollider.github.io/).
+
 ## Build
 
 ```sh
