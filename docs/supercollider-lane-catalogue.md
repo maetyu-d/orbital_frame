@@ -320,18 +320,3 @@ Quiet tone for checking routing and meters.
 }.play;
 )
 ```
-
-## Suggested State Combinations
-
-- **Drone state**: Radigue Root Body + Close Beating Tone + Air Band.
-- **Harmonic expansion**: Harmonic Swell + Slow Chord Wash + Sub Drone.
-- **Berlin section**: Berlin Pulse + Counter Arp + Warm Step Bass.
-- **Pop-pulse section**: Clean Kit + Warm Step Bass + Glass Hook + Soft PWM Chords.
-- **Fracture section**: Fractured Click Grid + Glass Hook + Sub Drone.
-
-## App Integration Ideas
-
-- Add a lane preset browser with these categories.
-- Store each script as a named preset with tags: `drone`, `arp`, `bass`, `drums`, `pad`, `utility`.
-- Let presets expose a few safe macro controls later, such as root note, density, brightness, and decay.
-- Add a "Replace lane from catalogue" command beside the SC code editor.
