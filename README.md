@@ -1,10 +1,10 @@
-# wf::
+# of::
 
 A JUCE/C++ desktop app for performing with a finite-state machine whose states host live SuperCollider lanes.
 
 ## Requires SuperCollider
 
-`wf::` uses SuperCollider for all live audio. Install SuperCollider before running the app:
+`of::` uses SuperCollider for all live audio. Install SuperCollider before running the app:
 
 - macOS app path expected by default: `/Applications/SuperCollider.app`
 - `sclang` is auto-detected at `/Applications/SuperCollider.app/Contents/MacOS/sclang`
@@ -16,7 +16,7 @@ Download SuperCollider from [supercollider.github.io](https://supercollider.gith
 
 ```sh
 cmake -S . -B build -DJUCE_PATH=../Granny/JUCE
-cmake --build build --target wf -j 6
+cmake --build build --target of -j 6
 ```
 
 If your JUCE checkout is somewhere else, pass that folder as `JUCE_PATH`.
@@ -26,7 +26,7 @@ If your JUCE checkout is somewhere else, pass that folder as `JUCE_PATH`.
 The built macOS app is:
 
 ```text
-build/wf_artefacts/Debug/wf.app
+build/of_artefacts/Debug/of.app
 ```
 
 ## SuperCollider
@@ -39,7 +39,7 @@ For tighter standalone audio-app behavior, the app keeps one persistent `sclang`
 
 Use `Boot audio` before performing to start the bridge and preload every lane program without playing anything. When `Run` starts, the app also preloads all lanes before the first transition.
 
-JUCE sends setup, play/stop, and emergency commands over OSC to the persistent language process on `127.0.0.1:57141`, with an ordered file-backed command path as startup insurance. Hidden code-level latency profiles control SC scheduling and buffer size without adding UI.
+JUCE sends setup, play/stop, and emergency commands over OSC to the persistent language process on `127.0.0.1:57143`, with an ordered file-backed command path as startup insurance. Hidden code-level latency profiles control SC scheduling and buffer size without adding UI.
 
 Lane objects are kept warm where possible: synth-like lane objects are gated/paused instead of recreated on every state change. A hidden crossfade value smooths state changes without adding a visible control.
 

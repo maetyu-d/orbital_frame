@@ -1,5 +1,5 @@
 {
-  "format": "wf:: Project",
+  "format": "of:: Project",
   "version": 1,
   "rate": 0.2,
   "masterGain": 5.0,

@@ -1,6 +1,6 @@
 # SuperCollider Lane Catalogue
 
-This catalogue collects lane-ready SuperCollider script patterns for `wf::`.
+This catalogue collects lane-ready SuperCollider script patterns for `of::`.
 Each script is designed to be pasted into a lane and run by the app.
 
 ## Lane Contract
@@ -19,10 +19,10 @@ Use this shape for most lanes:
 
 Notes:
 
-- `gate` is controlled by `wf::` when states start and stop.
+- `gate` is controlled by `of::` when states start and stop.
 - `fade` is supplied by the app for state-change smoothing.
 - `vol` is the lane volume from the UI.
-- Use `~wfTempoHz` for tempo-synced material.
+- Use `~ofTempoHz` for tempo-synced material.
 - Keep the final signal stereo.
 - Put a limiter near the end for aggressive or stacked material.
 - For long drones, use `Lag.kr(gate, seconds)` or a long ASR envelope so tails are not cut off.
@@ -115,7 +115,7 @@ Classic straight pulse, good for a main arp lane.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var trig = Impulse.kr((~wfTempoHz ? 1) * 4, 0);
+    var trig = Impulse.kr((~ofTempoHz ? 1) * 4, 0);
     var seq = Dseq([48, 55, 60, 67, 72, 67, 60, 55].midicps, inf);
     var freq = Demand.kr(trig, 0, seq);
     var env = EnvGen.kr(Env.perc(0.006, 0.18, curve: -4), trig);
@@ -134,7 +134,7 @@ Works well against the Berlin pulse in another lane.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var trig = Impulse.kr((~wfTempoHz ? 1) * 3, 0);
+    var trig = Impulse.kr((~ofTempoHz ? 1) * 3, 0);
     var seq = Dseq([72, 76, 79, 83, 81, 79, 76, 74].midicps, inf);
     var freq = Demand.kr(trig, 0, seq);
     var env = EnvGen.kr(Env.perc(0.004, 0.24, curve: -5), trig);
@@ -154,7 +154,7 @@ A bright melodic layer. Keep its lane volume modest.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var trig = Impulse.kr((~wfTempoHz ? 1) * 2, 0);
+    var trig = Impulse.kr((~ofTempoHz ? 1) * 2, 0);
     var seq = Dseq([76, 79, 83, 86, 84, 83, 79, 76].midicps, inf);
     var freq = Demand.kr(trig, 0, seq);
     var env = EnvGen.kr(Env.perc(0.002, 0.42, curve: -6), trig);
@@ -176,7 +176,7 @@ Tempo-locked but smooth enough not to thump on state changes.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var trig = Impulse.kr((~wfTempoHz ? 1), 0);
+    var trig = Impulse.kr((~ofTempoHz ? 1), 0);
     var seq = Dseq([36, 36, 43, 34, 36, 48, 41, 43].midicps, inf);
     var freq = Lag.kr(Demand.kr(trig, 0, seq), 0.025);
     var env = EnvGen.kr(Env.perc(0.012, 0.34, curve: -3), trig);
@@ -215,7 +215,7 @@ Simple, reliable, and not too aggressive.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var clock = Impulse.kr((~wfTempoHz ? 1) * 4, 0);
+    var clock = Impulse.kr((~ofTempoHz ? 1) * 4, 0);
     var step = PulseCount.kr(clock) % 16;
     var kickTrig = clock * ((step % 4) == 0);
     var snareTrig = clock * ((step == 4) + (step == 12));
@@ -240,7 +240,7 @@ For glitch sections. It is deliberately quiet.
 (
 { |gate=1, fade=0.12, vol=1|
     var active = EnvGen.kr(Env.asr(fade, 1, fade), gate);
-    var clock = Impulse.kr((~wfTempoHz ? 1) * 8, 0);
+    var clock = Impulse.kr((~ofTempoHz ? 1) * 8, 0);
     var pat = Dseq([1,0,1,0, 0,1,0,1, 1,1,0,0, 1,0,1,1], inf);
     var trig = clock * Demand.kr(clock, 0, pat);
     var freq = Demand.kr(trig, 0, Dseq([1200, 900, 1800, 640, 1500, 2100], inf));

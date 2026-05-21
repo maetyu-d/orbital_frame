@@ -6,28 +6,32 @@
 #include "SuperColliderHost.h"
 
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <future>
+#include <limits>
+#include <memory>
 #include <mutex>
+#include <numeric>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace
 {
-juce::Colour backgroundTop() { return juce::Colour (0xff13161a); }
-juce::Colour backgroundBottom() { return juce::Colour (0xff191d22); }
-juce::Colour ink() { return juce::Colour (0xfff2efe7); }
-juce::Colour mutedInk() { return juce::Colour (0xffaeb5bd); }
-juce::Colour accentA() { return juce::Colour (0xffffc857); }
-juce::Colour accentB() { return juce::Colour (0xff52d1dc); }
-juce::Colour accentC() { return juce::Colour (0xfff76f8e); }
-juce::Colour inspectedFill() { return juce::Colour (0xff1b2429); }
-juce::Colour panelFill() { return juce::Colour (0xff181c21); }
-juce::Colour rowFill() { return juce::Colour (0xff20252b); }
-juce::Colour hairline() { return juce::Colour (0xff334049); }
+juce::Colour backgroundTop() { return juce::Colour (0xff12161b); }
+juce::Colour backgroundBottom() { return juce::Colour (0xff181d23); }
+juce::Colour ink() { return juce::Colour (0xfff3efe6); }
+juce::Colour mutedInk() { return juce::Colour (0xffabb3bd); }
+juce::Colour accentA() { return juce::Colour (0xffffd84d); }
+juce::Colour accentB() { return juce::Colour (0xff35e7f2); }
+juce::Colour accentC() { return juce::Colour (0xffff6f96); }
+juce::Colour inspectedFill() { return juce::Colour (0xff1a2428); }
+juce::Colour panelFill() { return juce::Colour (0xff171c22); }
+juce::Colour rowFill() { return juce::Colour (0xff222a31); }
+juce::Colour hairline() { return juce::Colour (0xff3a4650); }
 bool colourblindSafePalette = false;
 
 void setColourblindSafePalette (bool shouldUse)
@@ -39,8 +43,8 @@ juce::Colour paletteColour (int index)
 {
     static constexpr juce::uint32 rainbowColours[] =
     {
-        0xfff2c14e, 0xff5fb7d9, 0xff80c987, 0xffdd9564,
-        0xffd56f8a, 0xff78aee6, 0xffd9d26b, 0xff6fc6a4
+        0xffffd23f, 0xff49cfff, 0xff77e58d, 0xffff9a52,
+        0xffff6f9a, 0xff7bb7ff, 0xfff2ea57, 0xff48e0b6
     };
 
     // Okabe-Ito inspired colours, chosen to stay distinct for common colour vision deficiencies.
@@ -65,6 +69,424 @@ juce::Colour transitionColourFor (int index)
 {
     return graphColour (index).interpolatedWith (mutedInk(), 0.54f);
 }
+
+bool isLaneDeleteKey (const juce::KeyPress& key)
+{
+    const auto keyCode = key.getKeyCode();
+    return keyCode == juce::KeyPress::backspaceKey || keyCode == juce::KeyPress::deleteKey;
+}
+
+class OfLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    OfLookAndFeel()
+    {
+        setColour (juce::TextButton::buttonColourId, rowFill().withAlpha (0.92f));
+        setColour (juce::TextButton::buttonOnColourId, rowFill().interpolatedWith (accentA(), 0.14f));
+        setColour (juce::TextButton::textColourOffId, mutedInk().withAlpha (0.92f));
+        setColour (juce::TextButton::textColourOnId, ink());
+        setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff101418));
+        setColour (juce::ComboBox::outlineColourId, hairline().withAlpha (0.70f));
+        setColour (juce::ComboBox::textColourId, ink().withAlpha (0.92f));
+        setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101418));
+        setColour (juce::TextEditor::outlineColourId, hairline().withAlpha (0.65f));
+        setColour (juce::TextEditor::focusedOutlineColourId, accentB().withAlpha (0.74f));
+        setColour (juce::TextEditor::textColourId, ink());
+        setColour (juce::Slider::thumbColourId, accentB().withAlpha (0.76f));
+        setColour (juce::Slider::trackColourId, hairline().withAlpha (0.55f));
+        setColour (juce::Slider::backgroundColourId, juce::Colour (0xff0f1317));
+    }
+
+    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
+    {
+        return juce::Font (juce::FontOptions (juce::jlimit (10.5f, 13.0f, static_cast<float> (buttonHeight) * 0.42f),
+                                             juce::Font::bold));
+    }
+
+    void drawButtonBackground (juce::Graphics& g,
+                               juce::Button& button,
+                               const juce::Colour& backgroundColour,
+                               bool highlighted,
+                               bool down) override
+    {
+        auto bounds = button.getLocalBounds().toFloat().reduced (0.75f);
+        const auto active = button.getToggleState();
+        const auto base = backgroundColour
+            .interpolatedWith (ink(), highlighted ? 0.045f : 0.0f)
+            .interpolatedWith (juce::Colour (0xff07090c), down ? 0.12f : 0.0f);
+
+        g.setColour (base.withAlpha (active ? 0.98f : 0.88f));
+        g.fillRoundedRectangle (bounds, 4.0f);
+        g.setColour ((active ? accentA() : hairline()).withAlpha (highlighted || active ? 0.68f : 0.46f));
+        g.drawRoundedRectangle (bounds, 4.0f, active ? 1.05f : 0.75f);
+    }
+
+    void drawComboBox (juce::Graphics& g, int width, int height, bool buttonDown,
+                       int, int, int, int, juce::ComboBox& box) override
+    {
+        auto bounds = juce::Rectangle<float> (0.75f, 0.75f, static_cast<float> (width) - 1.5f, static_cast<float> (height) - 1.5f);
+        g.setColour (box.findColour (juce::ComboBox::backgroundColourId).withAlpha (buttonDown ? 0.98f : 0.90f));
+        g.fillRoundedRectangle (bounds, 4.0f);
+        g.setColour (box.findColour (juce::ComboBox::outlineColourId).withAlpha (buttonDown ? 0.88f : 0.62f));
+        g.drawRoundedRectangle (bounds, 4.0f, 0.75f);
+
+        const auto arrow = juce::Rectangle<float> (static_cast<float> (width - 18), static_cast<float> (height) * 0.5f - 3.0f, 8.0f, 6.0f);
+        juce::Path chevron;
+        chevron.startNewSubPath (arrow.getX(), arrow.getY());
+        chevron.lineTo (arrow.getCentreX(), arrow.getBottom());
+        chevron.lineTo (arrow.getRight(), arrow.getY());
+        g.setColour (mutedInk().withAlpha (0.72f));
+        g.strokePath (chevron, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void fillTextEditorBackground (juce::Graphics& g, int width, int height, juce::TextEditor& editor) override
+    {
+        auto bounds = juce::Rectangle<float> (0.75f, 0.75f, static_cast<float> (width) - 1.5f, static_cast<float> (height) - 1.5f);
+        g.setColour (editor.findColour (juce::TextEditor::backgroundColourId).withAlpha (0.92f));
+        g.fillRoundedRectangle (bounds, 3.5f);
+    }
+
+    void drawTextEditorOutline (juce::Graphics& g, int width, int height, juce::TextEditor& editor) override
+    {
+        auto bounds = juce::Rectangle<float> (0.75f, 0.75f, static_cast<float> (width) - 1.5f, static_cast<float> (height) - 1.5f);
+        g.setColour ((editor.hasKeyboardFocus (true) ? editor.findColour (juce::TextEditor::focusedOutlineColourId)
+                                                     : editor.findColour (juce::TextEditor::outlineColourId))
+                         .withAlpha (editor.hasKeyboardFocus (true) ? 0.88f : 0.62f));
+        g.drawRoundedRectangle (bounds, 3.5f, editor.hasKeyboardFocus (true) ? 1.05f : 0.75f);
+    }
+};
+
+juce::String laneDurationModeToString (LaneDurationMode mode)
+{
+    switch (mode)
+    {
+        case LaneDurationMode::endOfBeat: return "beat";
+        case LaneDurationMode::endOfBar: return "bar";
+        case LaneDurationMode::fixedBars: return "bars";
+        case LaneDurationMode::fixedSeconds: return "seconds";
+        case LaneDurationMode::natural: return "natural";
+    }
+
+    return "natural";
+}
+
+LaneDurationMode laneDurationModeFromString (const juce::String& value)
+{
+    if (value == "beat") return LaneDurationMode::endOfBeat;
+    if (value == "bar") return LaneDurationMode::endOfBar;
+    if (value == "bars") return LaneDurationMode::fixedBars;
+    if (value == "seconds") return LaneDurationMode::fixedSeconds;
+    return LaneDurationMode::natural;
+}
+
+juce::String orbitConnectionActionToString (OrbitConnectionAction action)
+{
+    switch (action)
+    {
+        case OrbitConnectionAction::start: return "start";
+        case OrbitConnectionAction::pause: return "pause";
+        case OrbitConnectionAction::restart: return "restart";
+        case OrbitConnectionAction::reverse: return "reverse";
+        case OrbitConnectionAction::programmable: return "programmable";
+    }
+
+    return "start";
+}
+
+OrbitConnectionAction orbitConnectionActionFromString (const juce::String& value)
+{
+    if (value == "stop" || value == "pause") return OrbitConnectionAction::pause;
+    if (value == "restart") return OrbitConnectionAction::restart;
+    if (value == "reverse") return OrbitConnectionAction::reverse;
+    if (value == "programmable") return OrbitConnectionAction::programmable;
+    return OrbitConnectionAction::start;
+}
+
+juce::String orbitConnectionActionLabel (OrbitConnectionAction action)
+{
+    switch (action)
+    {
+        case OrbitConnectionAction::start: return "Start";
+        case OrbitConnectionAction::pause: return "Pause";
+        case OrbitConnectionAction::restart: return "Restart";
+        case OrbitConnectionAction::reverse: return "Reverse";
+        case OrbitConnectionAction::programmable: return "Fabric";
+    }
+
+    return "Start";
+}
+
+class RenderedAudioPlayer final : public juce::AudioIODeviceCallback
+{
+public:
+    RenderedAudioPlayer()
+    {
+        formatManager.registerBasicFormats();
+    }
+
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+    {
+        const juce::ScopedLock lock (audioLock);
+        deviceSampleRate = device != nullptr ? juce::jmax (1.0, device->getCurrentSampleRate()) : 44100.0;
+        transportSample = 0;
+        voices.clear();
+    }
+
+    void audioDeviceStopped() override
+    {
+        const juce::ScopedLock lock (audioLock);
+        voices.clear();
+        running = false;
+        transportSample = 0;
+    }
+
+    void audioDeviceIOCallbackWithContext (const float* const*, int,
+                                           float* const* outputChannelData, int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext&) override
+    {
+        for (int channel = 0; channel < numOutputChannels; ++channel)
+            if (outputChannelData[channel] != nullptr)
+                juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
+
+        const juce::ScopedLock lock (audioLock);
+        const auto blockStart = transportSample;
+        transportSample += numSamples;
+
+        if (! running)
+            return;
+
+        const auto blockEnd = blockStart + numSamples;
+        for (auto& voice : voices)
+        {
+            if (! voice.active || voice.file == nullptr || blockEnd <= voice.startSample)
+                continue;
+
+            const auto offset = static_cast<int> (juce::jmax<juce::int64> (0, voice.startSample - blockStart));
+            const auto available = numSamples - offset;
+            if (available <= 0)
+                continue;
+
+            const auto remaining = static_cast<int> (juce::jmin<juce::int64> (available, voice.maxOutputSamples - voice.outputSamplesPlayed));
+            if (remaining <= 0)
+            {
+                voice.active = false;
+                continue;
+            }
+
+            const auto leftGain = voice.gain * masterGain * (voice.pan <= 0.0f ? 1.0f : 1.0f - voice.pan);
+            const auto rightGain = voice.gain * masterGain * (voice.pan >= 0.0f ? 1.0f : 1.0f + voice.pan);
+            const auto sourceChannels = voice.file->buffer.getNumChannels();
+            const auto sourceSamples = voice.file->buffer.getNumSamples();
+
+            for (int i = 0; i < remaining; ++i)
+            {
+                const auto outputIndex = voice.outputSamplesPlayed;
+                if (voice.sourcePosition < 0.0 || voice.sourcePosition >= static_cast<double> (sourceSamples))
+                {
+                    voice.active = false;
+                    break;
+                }
+
+                const auto sourceIndex = static_cast<int> (voice.sourcePosition);
+                if (sourceIndex < 0 || sourceIndex >= sourceSamples)
+                {
+                    voice.active = false;
+                    break;
+                }
+
+                const auto nextIndex = voice.reverse ? juce::jmax (0, sourceIndex - 1)
+                                                     : juce::jmin (sourceSamples - 1, sourceIndex + 1);
+                const auto alpha = static_cast<float> (voice.sourcePosition - static_cast<double> (sourceIndex));
+                const auto left = interpolatedSample (voice.file->buffer, 0, sourceIndex, nextIndex, alpha);
+                const auto right = sourceChannels > 1 ? interpolatedSample (voice.file->buffer, 1, sourceIndex, nextIndex, alpha) : left;
+                const auto out = offset + i;
+                auto fadeGain = 1.0f;
+                if (voice.fadeInSamples > 0)
+                    fadeGain = juce::jmin (fadeGain, juce::jlimit (0.0f, 1.0f, static_cast<float> (outputIndex) / static_cast<float> (voice.fadeInSamples)));
+                if (voice.fadeOutSamples > 0)
+                    fadeGain = juce::jmin (fadeGain, juce::jlimit (0.0f, 1.0f, static_cast<float> (voice.maxOutputSamples - outputIndex) / static_cast<float> (voice.fadeOutSamples)));
+
+                if (numOutputChannels > 0 && outputChannelData[0] != nullptr)
+                    outputChannelData[0][out] += left * leftGain * fadeGain;
+
+                if (numOutputChannels > 1 && outputChannelData[1] != nullptr)
+                    outputChannelData[1][out] += right * rightGain * fadeGain;
+                else if (numOutputChannels > 0 && outputChannelData[0] != nullptr)
+                    outputChannelData[0][out] += right * rightGain * fadeGain;
+
+                voice.sourcePosition += voice.sourceIncrement;
+                ++voice.outputSamplesPlayed;
+            }
+
+            if (voice.outputSamplesPlayed >= voice.maxOutputSamples
+                || (! voice.reverse && voice.sourcePosition >= sourceSamples)
+                || (voice.reverse && voice.sourcePosition < 0.0))
+                voice.active = false;
+        }
+
+        voices.erase (std::remove_if (voices.begin(), voices.end(), [] (const Voice& voice)
+        {
+            return ! voice.active;
+        }), voices.end());
+    }
+
+    void start()
+    {
+        const juce::ScopedLock lock (audioLock);
+        voices.clear();
+        transportSample = 0;
+        running = true;
+    }
+
+    void stopAll()
+    {
+        const juce::ScopedLock lock (audioLock);
+        voices.clear();
+        running = false;
+    }
+
+    void stopLane (const juce::String& laneId)
+    {
+        const juce::ScopedLock lock (audioLock);
+        for (auto& voice : voices)
+            if (voice.laneId == laneId)
+                voice.active = false;
+    }
+
+    bool scheduleLane (const Lane& lane, double delaySeconds, float gain, double maxDurationSeconds, bool reverse = false, double sourceOffsetSeconds = 0.0)
+    {
+        auto file = loadFile (lane.frozenAudioPath);
+        if (file == nullptr)
+            return false;
+
+        const juce::ScopedLock lock (audioLock);
+        const auto startOffset = static_cast<juce::int64> (juce::jmax (0.0, delaySeconds) * deviceSampleRate);
+        Voice voice;
+        voice.laneId = lane.id;
+        voice.file = std::move (file);
+        voice.startSample = transportSample + startOffset;
+        voice.reverse = reverse;
+        const auto sourceIncrement = voice.file->sampleRate / deviceSampleRate;
+        voice.sourceIncrement = reverse ? -sourceIncrement : sourceIncrement;
+        const auto sourceOffset = juce::jlimit (0.0,
+                                                static_cast<double> (voice.file->buffer.getNumSamples() - 1),
+                                                juce::jmax (0.0, sourceOffsetSeconds) * voice.file->sampleRate);
+        const auto availableSourceSamples = reverse ? sourceOffset + 1.0
+                                                    : static_cast<double> (voice.file->buffer.getNumSamples()) - sourceOffset;
+        const auto fileOutputSamples = static_cast<juce::int64> ((availableSourceSamples / sourceIncrement) + 0.5);
+        const auto remainingDurationSeconds = reverse
+            ? (sourceOffsetSeconds > 0.0 ? sourceOffsetSeconds : maxDurationSeconds)
+            : (maxDurationSeconds - juce::jmax (0.0, sourceOffsetSeconds));
+        const auto durationOutputSamples = static_cast<juce::int64> (juce::jmax (0.01, remainingDurationSeconds) * deviceSampleRate + 0.5);
+        voice.maxOutputSamples = juce::jmin (fileOutputSamples, durationOutputSamples);
+        if (reverse)
+            voice.sourcePosition = sourceOffsetSeconds > 0.0
+                ? sourceOffset
+                : juce::jlimit (0.0,
+                                static_cast<double> (juce::jmax (0, voice.file->buffer.getNumSamples() - 1)),
+                                (static_cast<double> (voice.maxOutputSamples - 1) * sourceIncrement));
+        else
+            voice.sourcePosition = sourceOffset;
+        const auto maxFadeSamples = juce::jmax<juce::int64> (0, voice.maxOutputSamples / 2);
+        voice.fadeInSamples = juce::jlimit<juce::int64> (0, maxFadeSamples, static_cast<juce::int64> (juce::jmax (0.0, lane.fadeInSeconds) * deviceSampleRate + 0.5));
+        voice.fadeOutSamples = juce::jlimit<juce::int64> (0, maxFadeSamples, static_cast<juce::int64> (juce::jmax (0.0, lane.fadeOutSeconds) * deviceSampleRate + 0.5));
+        voice.gain = gain;
+        voice.pan = juce::jlimit (-1.0f, 1.0f, lane.pan);
+        voices.push_back (std::move (voice));
+        running = true;
+        return true;
+    }
+
+    void setLaneMix (const juce::String& laneId, float gain, float pan)
+    {
+        const juce::ScopedLock lock (audioLock);
+        for (auto& voice : voices)
+        {
+            if (voice.laneId == laneId)
+            {
+                voice.gain = gain;
+                voice.pan = juce::jlimit (-1.0f, 1.0f, pan);
+            }
+        }
+    }
+
+    void setMasterGain (float gain)
+    {
+        const juce::ScopedLock lock (audioLock);
+        masterGain = juce::jlimit (0.0f, 5.0f, gain);
+    }
+
+private:
+    struct RenderedFile
+    {
+        juce::AudioBuffer<float> buffer;
+        double sampleRate = 44100.0;
+        juce::int64 size = 0;
+        juce::Time modified;
+    };
+
+    struct Voice
+    {
+        juce::String laneId;
+        std::shared_ptr<RenderedFile> file;
+        juce::int64 startSample = 0;
+        juce::int64 outputSamplesPlayed = 0;
+        juce::int64 maxOutputSamples = 0;
+        juce::int64 fadeInSamples = 0;
+        juce::int64 fadeOutSamples = 0;
+        double sourcePosition = 0.0;
+        double sourceIncrement = 1.0;
+        float gain = 1.0f;
+        float pan = 0.0f;
+        bool reverse = false;
+        bool active = true;
+    };
+
+    static float interpolatedSample (const juce::AudioBuffer<float>& buffer, int channel, int index, int nextIndex, float alpha)
+    {
+        const auto* data = buffer.getReadPointer (channel);
+        return data[index] + (data[nextIndex] - data[index]) * alpha;
+    }
+
+    std::shared_ptr<RenderedFile> loadFile (const juce::String& path)
+    {
+        if (path.isEmpty())
+            return {};
+
+        const auto file = juce::File (path);
+        const auto key = path.toStdString();
+        if (auto found = cache.find (key); found != cache.end()
+            && found->second->size == file.getSize()
+            && found->second->modified == file.getLastModificationTime())
+        {
+            return found->second;
+        }
+
+        auto reader = std::unique_ptr<juce::AudioFormatReader> (formatManager.createReaderFor (file));
+        if (reader == nullptr || reader->lengthInSamples <= 0)
+            return {};
+
+        auto rendered = std::make_shared<RenderedFile>();
+        rendered->sampleRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
+        rendered->size = file.getSize();
+        rendered->modified = file.getLastModificationTime();
+        rendered->buffer.setSize (static_cast<int> (juce::jmax<juce::uint32> (1, reader->numChannels)),
+                                  static_cast<int> (juce::jmin<juce::int64> (reader->lengthInSamples, std::numeric_limits<int>::max())));
+        reader->read (&rendered->buffer, 0, rendered->buffer.getNumSamples(), 0, true, true);
+        cache[key] = rendered;
+        return rendered;
+    }
+
+    juce::CriticalSection audioLock;
+    juce::AudioFormatManager formatManager;
+    std::unordered_map<std::string, std::shared_ptr<RenderedFile>> cache;
+    std::vector<Voice> voices;
+    double deviceSampleRate = 44100.0;
+    juce::int64 transportSample = 0;
+    float masterGain = 1.0f;
+    bool running = false;
+};
 } // namespace
 
 struct LaneMeterValues
@@ -1511,9 +1933,11 @@ public:
     std::function<void (int, int)> onNestedStateSelected;
     std::function<void (int, int)> onLaneSelected;
     std::function<void (int, int)> onStateLengthChanged;
+    std::function<void()> onDeleteSelectedLaneRequested;
 
     ArrangementStripComponent()
     {
+        setWantsKeyboardFocus (true);
         startTimerHz (60);
     }
 
@@ -1531,6 +1955,8 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        grabKeyboardFocus();
+
         if (extended)
         {
             if (handleZoomControlClick (event.position))
@@ -1563,6 +1989,18 @@ public:
 
         if (const auto index = stateIndexAt (event.position); index >= 0 && onStateSelected)
             onStateSelected (index);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (isLaneDeleteKey (key))
+        {
+            if (onDeleteSelectedLaneRequested)
+                onDeleteSelectedLaneRequested();
+            return true;
+        }
+
+        return false;
     }
 
     void mouseDrag (const juce::MouseEvent& event) override
@@ -2626,6 +3064,1809 @@ private:
     juce::String hoverHint;
 };
 
+class OrbitTrackCanvas final : public juce::Component,
+                               private juce::Timer
+{
+public:
+    std::function<void (int)> onTrackSelected;
+    std::function<void (int, int)> onLaneSelected;
+    std::function<void (int)> onTrackFocusRequested;
+    std::function<void()> onTrackFocusCleared;
+    std::function<void (int, float)> onScriptDropRequested;
+    std::function<void (int, int, float)> onWarpChanged;
+    std::function<void (int, int, float, bool)> onLanePhaseChanged;
+    std::function<void (int, int, float, float, bool)> onLaneTrimChanged;
+    std::function<void (int, int, double, double, bool)> onLaneFadeChanged;
+    std::function<void (int, int)> onRenderedLaneSelected;
+    std::function<void (int, int)> onDeleteRenderedLaneRequested;
+    std::function<void()> onDeleteSelectedLaneRequested;
+    std::function<void (int, int, float, int)> onConnectionRequested;
+
+    enum class PlayheadMode
+    {
+        forward,
+        reverse,
+        paused
+    };
+
+    struct StatePlayhead
+    {
+        PlayheadMode mode = PlayheadMode::forward;
+        double startedMs = 0.0;
+        float startPhase = 0.0f;
+    };
+
+    OrbitTrackCanvas()
+    {
+        formatManager.registerBasicFormats();
+        startTimerHz (45);
+        setWantsKeyboardFocus (true);
+    }
+
+    void setMachine (MachineModel& rootMachine, double playbackRate, bool running, int focusedTrack)
+    {
+        machine = &rootMachine;
+        rate = juce::jmax (0.05, playbackRate);
+        transportRunning = running;
+        const auto newFocusedTrack = focusedTrack >= 0 && focusedTrack < machine->getStateCount() ? focusedTrack : -1;
+        if (newFocusedTrack != focusedTrackIndex)
+        {
+            focusedViewZoom = 1.0f;
+            focusedViewPan = {};
+            panningFocusedView = false;
+        }
+
+        focusedTrackIndex = newFocusedTrack;
+        repaint();
+    }
+
+    void invalidateWaveforms()
+    {
+        waveforms.clear();
+        repaint();
+    }
+
+    void setShapeEditMode (bool shouldEdit)
+    {
+        shapeEditMode = shouldEdit;
+        repaint();
+    }
+
+    void resetTransportStart()
+    {
+        visualTransportStartMs = juce::Time::getMillisecondCounterHiRes();
+        statePlayheads.clear();
+        repaint();
+    }
+
+    void setReversePlayhead (int stateIndex, bool reversed)
+    {
+        if (reversed)
+            setReversePlayheadFromPhase (stateIndex, currentPlayheadPhaseForState (stateIndex));
+        else
+            statePlayheads.erase (stateIndex);
+
+        repaint();
+    }
+
+    void setReversePlayheadFromPhase (int stateIndex, float phase)
+    {
+        statePlayheads[stateIndex] = { PlayheadMode::reverse,
+                                       juce::Time::getMillisecondCounterHiRes(),
+                                       juce::jlimit (0.0f, 0.9999f, phase) };
+        repaint();
+    }
+
+    void setForwardPlayheadFromPhase (int stateIndex, float phase)
+    {
+        statePlayheads[stateIndex] = { PlayheadMode::forward,
+                                       juce::Time::getMillisecondCounterHiRes(),
+                                       juce::jlimit (0.0f, 0.9999f, phase) };
+        repaint();
+    }
+
+    void setRestartPlayhead (int stateIndex)
+    {
+        statePlayheads[stateIndex] = { PlayheadMode::forward, juce::Time::getMillisecondCounterHiRes(), 0.0f };
+        repaint();
+    }
+
+    void setPausedPlayhead (int stateIndex)
+    {
+        statePlayheads[stateIndex] = { PlayheadMode::paused,
+                                       juce::Time::getMillisecondCounterHiRes(),
+                                       currentPlayheadPhaseForState (stateIndex) };
+        repaint();
+    }
+
+    bool isPlayheadPaused (int stateIndex) const
+    {
+        if (const auto found = statePlayheads.find (stateIndex); found != statePlayheads.end())
+            return found->second.mode == PlayheadMode::paused;
+
+        return false;
+    }
+
+    bool isPlayheadReversed (int stateIndex) const
+    {
+        if (const auto found = statePlayheads.find (stateIndex); found != statePlayheads.end())
+            return found->second.mode == PlayheadMode::reverse;
+
+        return false;
+    }
+
+    float playheadPhaseForState (int stateIndex) const
+    {
+        return currentPlayheadPhaseForState (stateIndex);
+    }
+
+    void clearReversePlayheads()
+    {
+        statePlayheads.clear();
+        repaint();
+    }
+
+    void setSelectedRenderedLane (int stateIndex, int laneIndex)
+    {
+        selectedRenderedTrack = stateIndex;
+        selectedRenderedLane = laneIndex;
+        repaint();
+    }
+
+    void clearSelectedRenderedLane()
+    {
+        clearRenderedSelection();
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto bounds = getLocalBounds().toFloat();
+        g.setColour (backgroundTop().interpolatedWith (backgroundBottom(), 0.50f).withAlpha (0.96f));
+        g.fillRoundedRectangle (bounds.reduced (2.0f), 5.0f);
+        g.setColour (hairline().withAlpha (0.22f));
+        g.drawRoundedRectangle (bounds.reduced (2.0f), 5.0f, 0.75f);
+
+        if (machine == nullptr || machine->states.empty())
+            return;
+
+        layoutTracks();
+        drawConnections (g);
+        drawTracks (g);
+    }
+
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        grabKeyboardFocus();
+        draggingTrack = -1;
+        draggingWarpIndex = -1;
+        draggingLaneTrack = -1;
+        draggingLaneIndex = -1;
+        draggingLaneHasMoved = false;
+        draggingTrim = TrimHandle::none;
+        panningFocusedView = false;
+        panningOverviewView = false;
+
+        if (auto handle = trimHandleHitTest (event.position); handle.track >= 0 && handle.lane >= 0)
+        {
+            selectedRenderedTrack = handle.track;
+            selectedRenderedLane = handle.lane;
+            draggingLaneTrack = handle.track;
+            draggingLaneIndex = handle.lane;
+            draggingTrim = handle.handle;
+
+            if (auto* layout = layoutForState (handle.track))
+            {
+                auto& state = machine->state (handle.track);
+                const auto& lane = state.lanes[static_cast<size_t> (handle.lane)];
+                trimStartPhase = lane.orbitPhase;
+                trimEndPhase = juce::jlimit (trimStartPhase + 0.002f, 0.9999f, trimStartPhase + lanePhaseSpan (state, lane));
+                juce::ignoreUnused (layout);
+            }
+
+            if (onRenderedLaneSelected)
+                onRenderedLaneSelected (handle.track, handle.lane);
+
+            repaint();
+            return;
+        }
+
+        if (focusedTrackIndex < 0 && pendingConnection.active)
+        {
+            const auto target = stateAtPoint (event.position);
+            if (target >= 0 && onConnectionRequested)
+                onConnectionRequested (pendingConnection.sourceState,
+                                       pendingConnection.sourceLane,
+                                       pendingConnection.sourcePhase,
+                                       target);
+
+            pendingConnection = {};
+            repaint();
+            return;
+        }
+
+        if (auto hit = waveformHitTest (event.position); hit.track >= 0 && hit.lane >= 0)
+        {
+            selectedRenderedTrack = hit.track;
+            selectedRenderedLane = hit.lane;
+            draggingLaneTrack = hit.track;
+            draggingLaneIndex = hit.lane;
+
+            if (onRenderedLaneSelected)
+                onRenderedLaneSelected (hit.track, hit.lane);
+
+            repaint();
+            return;
+        }
+
+        if (shapeEditMode)
+        {
+            for (int i = 0; i < static_cast<int> (trackLayouts.size()); ++i)
+            {
+                const auto warpIndex = warpHandleAt (i, event.position);
+                if (warpIndex >= 0)
+                {
+                    draggingTrack = trackLayouts[static_cast<size_t> (i)].stateIndex;
+                    draggingWarpIndex = warpIndex;
+                    clearRenderedSelection();
+                    if (onTrackSelected)
+                        onTrackSelected (draggingTrack);
+                    return;
+                }
+            }
+        }
+
+        if (auto hit = orbitHitTest (event.position); hit.track >= 0)
+        {
+            if (focusedTrackIndex < 0 && hit.lane >= 0 && event.mods.isPopupMenu())
+            {
+                clearRenderedSelection();
+                pendingConnection = { true, hit.track, hit.lane, hit.phase, event.position };
+                machine->selectedState = hit.track;
+                machine->selectedLane = hit.lane;
+                if (onLaneSelected)
+                    onLaneSelected (hit.track, hit.lane);
+                repaint();
+                return;
+            }
+
+            clearRenderedSelection();
+            machine->selectedState = hit.track;
+            if (hit.lane >= 0)
+                machine->selectedLane = hit.lane;
+            if (hit.lane >= 0 && onLaneSelected)
+                onLaneSelected (hit.track, hit.lane);
+            else if (onTrackSelected)
+                onTrackSelected (hit.track);
+
+            if (hit.lane >= 0 && isPlacedLane (machine->state (hit.track).lanes[static_cast<size_t> (hit.lane)]))
+            {
+                draggingLaneTrack = hit.track;
+                draggingLaneIndex = hit.lane;
+            }
+
+            repaint();
+            return;
+        }
+
+        if (focusedTrackIndex >= 0 && event.mods.isPopupMenu())
+        {
+            panningFocusedView = true;
+            focusedPanStart = focusedViewPan;
+            focusedPanDragStart = event.position;
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            return;
+        }
+
+        if (focusedTrackIndex < 0 && event.mods.isPopupMenu())
+        {
+            panningOverviewView = true;
+            overviewPanStart = overviewViewPan;
+            overviewPanDragStart = event.position;
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (panningOverviewView)
+        {
+            overviewViewPan = overviewPanStart + (event.position - overviewPanDragStart);
+            repaint();
+            return;
+        }
+
+        if (panningFocusedView)
+        {
+            focusedViewPan = focusedPanStart + (event.position - focusedPanDragStart);
+            repaint();
+            return;
+        }
+
+        if (machine != nullptr && draggingTrim != TrimHandle::none && draggingLaneTrack >= 0 && draggingLaneIndex >= 0)
+        {
+            updateDraggedTrim (event.position, false);
+            return;
+        }
+
+        if (machine != nullptr && draggingLaneTrack >= 0 && draggingLaneIndex >= 0)
+        {
+            draggingLaneHasMoved = true;
+            updateDraggedLanePhase (event.position, false);
+            return;
+        }
+
+        if (machine == nullptr || draggingTrack < 0 || draggingWarpIndex < 0)
+            return;
+
+        auto* layout = layoutForState (draggingTrack);
+        if (layout == nullptr)
+            return;
+
+        const auto angle = angleForWarpIndex (draggingWarpIndex);
+        const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+        const auto radial = (event.position - layout->centre).getDotProduct (normal);
+        const auto warp = juce::jlimit (-0.32f, 0.42f, (radial - layout->radius) / juce::jmax (24.0f, layout->radius));
+        machine->state (draggingTrack).orbitWarp[static_cast<size_t> (draggingWarpIndex)] = warp;
+        if (onWarpChanged)
+            onWarpChanged (draggingTrack, draggingWarpIndex, warp);
+        repaint();
+    }
+
+    void mouseMove (const juce::MouseEvent& event) override
+    {
+        if (pendingConnection.active)
+        {
+            pendingConnection.mouse = event.position;
+            repaint();
+        }
+
+        setMouseCursor (trimHandleHitTest (event.position).track >= 0 || waveformHitTest (event.position).track >= 0
+                            ? juce::MouseCursor::DraggingHandCursor
+                            : juce::MouseCursor::NormalCursor);
+    }
+
+    void mouseUp (const juce::MouseEvent& event) override
+    {
+        if (machine != nullptr && draggingTrim != TrimHandle::none && draggingLaneTrack >= 0 && draggingLaneIndex >= 0)
+            updateDraggedTrim (event.position, true);
+
+        if (machine != nullptr && draggingLaneTrack >= 0 && draggingLaneIndex >= 0 && draggingLaneHasMoved)
+            updateDraggedLanePhase (event.position, true);
+
+        draggingTrack = -1;
+        draggingWarpIndex = -1;
+        draggingLaneTrack = -1;
+        draggingLaneIndex = -1;
+        draggingLaneHasMoved = false;
+        draggingTrim = TrimHandle::none;
+        panningFocusedView = false;
+        panningOverviewView = false;
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
+    {
+        if (machine == nullptr)
+            return;
+
+        const auto wheelDelta = std::abs (wheel.deltaY) > std::abs (wheel.deltaX) ? wheel.deltaY : wheel.deltaX;
+        if (std::abs (wheelDelta) < 0.0001f)
+            return;
+
+        if (focusedTrackIndex < 0)
+        {
+            const auto anchor = getLocalBounds().toFloat().getCentre();
+            const auto oldZoom = overviewViewZoom;
+            const auto basePoint = anchor + ((event.position - anchor - overviewViewPan) / juce::jmax (0.001f, oldZoom));
+            const auto zoomFactor = std::pow (1.16f, wheelDelta * 7.0f);
+            overviewViewZoom = juce::jlimit (0.55f, 5.0f, overviewViewZoom * zoomFactor);
+
+            if (std::abs (overviewViewZoom - oldZoom) < 0.0001f)
+                return;
+
+            overviewViewPan = event.position - anchor - ((basePoint - anchor) * overviewViewZoom);
+            repaint();
+            return;
+        }
+
+        layoutTracks();
+        auto* layout = layoutForState (focusedTrackIndex);
+        const auto oldCentre = layout != nullptr ? layout->centre : getLocalBounds().toFloat().getCentre();
+        const auto oldZoom = focusedViewZoom;
+        const auto zoomFactor = std::pow (1.16f, wheelDelta * 7.0f);
+        focusedViewZoom = juce::jlimit (0.55f, 5.0f, focusedViewZoom * zoomFactor);
+
+        if (std::abs (focusedViewZoom - oldZoom) < 0.0001f)
+            return;
+
+        const auto ratio = focusedViewZoom / juce::jmax (0.001f, oldZoom);
+        const auto newCentre = event.position - (event.position - oldCentre) * ratio;
+        focusedViewPan += newCentre - oldCentre;
+        repaint();
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& event) override
+    {
+        pendingConnection = {};
+
+        if (auto hit = orbitHitTest (event.position); hit.track >= 0)
+        {
+            if (focusedTrackIndex >= 0)
+                onScriptDropRequested (hit.track, hit.phase);
+            else if (onTrackFocusRequested)
+                onTrackFocusRequested (hit.track);
+            return;
+        }
+
+        if (focusedTrackIndex >= 0 && onTrackFocusCleared)
+            onTrackFocusCleared();
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (isLaneDeleteKey (key))
+        {
+            if (selectedRenderedTrack >= 0 && selectedRenderedLane >= 0 && onDeleteRenderedLaneRequested)
+            {
+                onDeleteRenderedLaneRequested (selectedRenderedTrack, selectedRenderedLane);
+                clearRenderedSelection();
+                repaint();
+                return true;
+            }
+
+            if (onDeleteSelectedLaneRequested)
+                onDeleteSelectedLaneRequested();
+            return true;
+        }
+
+        if (key.getKeyCode() == juce::KeyPress::escapeKey && focusedTrackIndex >= 0)
+        {
+            if (onTrackFocusCleared)
+                onTrackFocusCleared();
+            return true;
+        }
+
+        if (key.getKeyCode() == juce::KeyPress::escapeKey && pendingConnection.active)
+        {
+            pendingConnection = {};
+            repaint();
+            return true;
+        }
+
+        return false;
+    }
+
+private:
+    struct TrackLayout
+    {
+        int stateIndex = 0;
+        juce::Point<float> centre;
+        float radius = 1.0f;
+        float laneGap = 18.0f;
+        float outerRadius = 1.0f;
+    };
+
+    struct Hit
+    {
+        int track = -1;
+        int lane = -1;
+        float phase = 0.0f;
+    };
+
+    enum class TrimHandle
+    {
+        none,
+        start,
+        end,
+        fadeIn,
+        fadeOut
+    };
+
+    struct TrimHit
+    {
+        int track = -1;
+        int lane = -1;
+        TrimHandle handle = TrimHandle::none;
+    };
+
+    struct PendingConnection
+    {
+        bool active = false;
+        int sourceState = -1;
+        int sourceLane = -1;
+        float sourcePhase = 0.0f;
+        juce::Point<float> mouse;
+    };
+
+    void timerCallback() override
+    {
+        if (isShowing() && transportRunning)
+            repaint();
+    }
+
+    void layoutTracks()
+    {
+        trackLayouts.clear();
+        auto area = getLocalBounds().toFloat().reduced (16.0f, 14.0f);
+        std::vector<int> stateIndices;
+        if (focusedTrackIndex >= 0)
+            stateIndices.push_back (focusedTrackIndex);
+        else
+            for (int i = 0; i < machine->getStateCount(); ++i)
+                stateIndices.push_back (i);
+
+        const auto count = static_cast<int> (stateIndices.size());
+        if (count <= 0 || area.getWidth() <= 0.0f || area.getHeight() <= 0.0f)
+            return;
+
+        if (focusedTrackIndex < 0)
+        {
+            layoutOverviewTracks (area, stateIndices);
+            return;
+        }
+
+        const auto columns = 1;
+        const auto rows = juce::jmax (1, static_cast<int> (std::ceil (static_cast<float> (count) / static_cast<float> (juce::jmax (1, columns)))));
+        const auto cellW = area.getWidth() / static_cast<float> (juce::jmax (1, columns));
+        const auto cellH = area.getHeight() / static_cast<float> (rows);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto stateIndex = stateIndices[static_cast<size_t> (i)];
+            const auto col = i % columns;
+            const auto row = i / columns;
+            const auto rowStart = row * columns;
+            const auto itemsInRow = juce::jmin (columns, count - rowStart);
+            const auto rowInset = focusedTrackIndex >= 0 ? 0.0f : (static_cast<float> (columns - itemsInRow) * cellW * 0.5f);
+            auto cell = juce::Rectangle<float> (area.getX() + rowInset + cellW * static_cast<float> (col),
+                                                area.getY() + cellH * static_cast<float> (row),
+                                                cellW, cellH).reduced (28.0f);
+            const auto metrics = metricsForCell (cell, machine->state (stateIndex), true);
+            constexpr float labelHeight = 34.0f;
+            const auto verticalCentre = cell.withTrimmedBottom (labelHeight).getCentreY();
+            auto centre = juce::Point<float> { cell.getCentreX(), verticalCentre };
+            auto radius = metrics.radius;
+            auto laneGap = metrics.laneGap;
+            auto outerRadius = metrics.outerRadius;
+
+            centre += focusedViewPan;
+            radius *= focusedViewZoom;
+            laneGap *= focusedViewZoom;
+            outerRadius *= focusedViewZoom;
+
+            trackLayouts.push_back ({ stateIndex, centre, radius, laneGap, outerRadius });
+        }
+    }
+
+    struct TrackMetrics
+    {
+        float radius = 34.0f;
+        float laneGap = 10.0f;
+        float outerRadius = 42.0f;
+    };
+
+    void layoutOverviewTracks (juce::Rectangle<float> area, const std::vector<int>& stateIndices)
+    {
+        constexpr float labelHeight = 38.0f;
+        constexpr float minGap = 20.0f;
+
+        const auto count = static_cast<int> (stateIndices.size());
+        const auto columns = chooseColumnCount (count);
+        const auto rows = juce::jmax (1, static_cast<int> (std::ceil (static_cast<float> (count) / static_cast<float> (juce::jmax (1, columns)))));
+
+        std::vector<TrackMetrics> metrics;
+        metrics.reserve (stateIndices.size());
+        for (auto stateIndex : stateIndices)
+            metrics.push_back (overviewMetricsForState (machine->state (stateIndex)));
+
+        auto maxOuterRadius = 1.0f;
+        for (const auto& itemMetrics : metrics)
+            maxOuterRadius = juce::jmax (maxOuterRadius, itemMetrics.outerRadius);
+
+        const auto slotWidth = maxOuterRadius * 2.0f;
+        const auto slotHeight = maxOuterRadius * 2.0f + labelHeight;
+        const auto requiredWidth = static_cast<float> (columns) * slotWidth
+                                 + static_cast<float> (juce::jmax (0, columns - 1)) * minGap;
+        const auto requiredHeight = static_cast<float> (rows) * slotHeight
+                                  + static_cast<float> (juce::jmax (0, rows - 1)) * minGap;
+        const auto fitScale = juce::jlimit (0.12f, 1.65f,
+                                            juce::jmin (area.getWidth() / juce::jmax (1.0f, requiredWidth),
+                                                        area.getHeight() / juce::jmax (1.0f, requiredHeight)) * 0.96f);
+
+        const auto scaledSlotWidth = slotWidth * fitScale;
+        const auto scaledGap = minGap * fitScale;
+        const auto scaledMaxOuterRadius = maxOuterRadius * fitScale;
+        const auto scaledHeight = requiredHeight * fitScale;
+        const auto firstRowCentreY = area.getCentreY() - scaledHeight * 0.5f + scaledMaxOuterRadius;
+        const auto rowCentreStep = (slotHeight + minGap) * fitScale;
+
+        for (int row = 0; row < rows; ++row)
+        {
+            const auto start = row * columns;
+            const auto items = juce::jmin (columns, count - start);
+            if (items <= 0)
+                continue;
+
+            const auto rowWidth = static_cast<float> (items) * scaledSlotWidth
+                                + static_cast<float> (juce::jmax (0, items - 1)) * scaledGap;
+            auto x = area.getCentreX() - rowWidth * 0.5f;
+            const auto rowCentreY = firstRowCentreY + static_cast<float> (row) * rowCentreStep;
+
+            for (int item = 0; item < items; ++item)
+            {
+                const auto index = start + item;
+                auto itemMetrics = metrics[static_cast<size_t> (index)];
+                itemMetrics.radius *= fitScale;
+                itemMetrics.laneGap *= fitScale;
+                itemMetrics.outerRadius *= fitScale;
+
+                const auto centre = juce::Point<float> { x + scaledSlotWidth * 0.5f,
+                                                         rowCentreY };
+                trackLayouts.push_back ({ stateIndices[static_cast<size_t> (index)],
+                                          centre,
+                                          itemMetrics.radius,
+                                          itemMetrics.laneGap,
+                                          itemMetrics.outerRadius });
+                x += scaledSlotWidth + scaledGap;
+            }
+        }
+
+        applyOverviewViewTransform();
+    }
+
+    void applyOverviewViewTransform()
+    {
+        if (std::abs (overviewViewZoom - 1.0f) < 0.0001f && overviewViewPan.getDistanceFromOrigin() < 0.001f)
+            return;
+
+        const auto anchor = getLocalBounds().toFloat().getCentre();
+        for (auto& layout : trackLayouts)
+        {
+            layout.centre = anchor + overviewViewPan + ((layout.centre - anchor) * overviewViewZoom);
+            layout.radius *= overviewViewZoom;
+            layout.laneGap *= overviewViewZoom;
+            layout.outerRadius *= overviewViewZoom;
+        }
+    }
+
+    TrackMetrics overviewMetricsForState (const State& state) const
+    {
+        const auto laneCount = juce::jmax (1, static_cast<int> (state.lanes.size()));
+        const auto hasRenderedLanes = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+        {
+            return lane.freezeInProgress || (lane.frozen && lane.frozenAudioPath.isNotEmpty());
+        });
+
+        const auto baseRadius = hasRenderedLanes ? 72.0f : 82.0f;
+        const auto laneGap = hasRenderedLanes ? 36.0f : 15.0f;
+        const auto maxPositiveWarp = juce::jlimit (0.0f, 0.42f, *std::max_element (state.orbitWarp.begin(), state.orbitWarp.end()));
+        const auto pipeAllowance = hasRenderedLanes ? 28.0f : 8.0f;
+        const auto handleAllowance = hasRenderedLanes ? 16.0f : 6.0f;
+        const auto outer = (baseRadius + static_cast<float> (laneCount - 1) * laneGap) * (1.0f + maxPositiveWarp)
+                         + pipeAllowance + handleAllowance;
+
+        return { baseRadius, laneGap, outer };
+    }
+
+    TrackMetrics metricsForCell (juce::Rectangle<float> cell, const State& state, bool focused = false) const
+    {
+        constexpr float labelHeight = 34.0f;
+        const auto safety = focused ? 22.0f : 9.0f;
+        const auto laneCount = juce::jmax (1, static_cast<int> (state.lanes.size()));
+        auto laneGap = juce::jlimit (focused ? 12.0f : 7.0f, focused ? 24.0f : 14.0f,
+                                     juce::jmin (cell.getWidth(), cell.getHeight()) / (focused ? 18.0f : 24.0f));
+        const auto hasRenderedLanes = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+        {
+            return lane.freezeInProgress || (lane.frozen && lane.frozenAudioPath.isNotEmpty());
+        });
+        if (hasRenderedLanes)
+            laneGap = juce::jmax (laneGap, focused ? 58.0f : 38.0f);
+
+        const auto maxPositiveWarp = juce::jlimit (0.0f, 0.42f, *std::max_element (state.orbitWarp.begin(), state.orbitWarp.end()));
+        const auto pipeAllowance = hasRenderedLanes ? (focused ? 30.0f : 18.0f) : 5.0f;
+
+        auto solveRadius = [&] (float gap)
+        {
+            const auto laneOffset = static_cast<float> (laneCount - 1) * gap;
+            const auto availableX = cell.getWidth() * 0.5f - safety;
+            const auto availableY = (cell.getHeight() - labelHeight) * 0.5f - safety;
+            return (juce::jmin (availableX, availableY) - pipeAllowance) / (1.0f + maxPositiveWarp) - laneOffset;
+        };
+
+        auto radius = solveRadius (laneGap);
+        if (radius < 30.0f && laneCount > 1)
+        {
+            laneGap = juce::jlimit (hasRenderedLanes ? 22.0f : 5.0f, laneGap, cell.getHeight() / static_cast<float> (laneCount + 14));
+            radius = solveRadius (laneGap);
+        }
+
+        radius = juce::jlimit (focused ? 88.0f : 24.0f, focused ? 260.0f : 92.0f, radius);
+        const auto outer = (radius + static_cast<float> (laneCount - 1) * laneGap) * (1.0f + maxPositiveWarp) + pipeAllowance;
+        return { radius, laneGap, outer };
+    }
+
+    int chooseColumnCount (int count) const
+    {
+        if (count <= 3)
+            return juce::jmax (1, count);
+
+        return juce::jmax (2, static_cast<int> (std::ceil (std::sqrt (static_cast<float> (count)))));
+    }
+
+    float angleForWarpIndex (int index) const
+    {
+        return juce::MathConstants<float>::twoPi * static_cast<float> (index) / 8.0f
+             - juce::MathConstants<float>::halfPi;
+    }
+
+    float radiusForAngle (const State& state, float baseRadius, float angle) const
+    {
+        const auto normalised = std::fmod ((angle + juce::MathConstants<float>::halfPi + juce::MathConstants<float>::twoPi),
+                                           juce::MathConstants<float>::twoPi)
+                              / juce::MathConstants<float>::twoPi;
+        const auto scaled = normalised * 8.0f;
+        const auto i0 = juce::jlimit (0, 7, static_cast<int> (std::floor (scaled)));
+        const auto i1 = (i0 + 1) % 8;
+        const auto t = scaled - static_cast<float> (i0);
+        const auto warp = state.orbitWarp[static_cast<size_t> (i0)] * (1.0f - t)
+                        + state.orbitWarp[static_cast<size_t> (i1)] * t;
+        return baseRadius * (1.0f + warp);
+    }
+
+    juce::Point<float> pointOnTrack (const State& state, const TrackLayout& layout, float phase, float laneOffset = 0.0f) const
+    {
+        const auto angle = phase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+        const auto radius = radiusForAngle (state, layout.radius + laneOffset, angle);
+        return layout.centre + juce::Point<float> (std::cos (angle), std::sin (angle)) * radius;
+    }
+
+    juce::Path makeTrackPath (const State& state, const TrackLayout& layout, float laneOffset = 0.0f) const
+    {
+        juce::Path path;
+        constexpr int segments = 144;
+        for (int i = 0; i <= segments; ++i)
+        {
+            const auto phase = static_cast<float> (i) / static_cast<float> (segments);
+            const auto point = pointOnTrack (state, layout, phase, laneOffset);
+            if (i == 0)
+                path.startNewSubPath (point);
+            else
+                path.lineTo (point);
+        }
+        path.closeSubPath();
+        return path;
+    }
+
+    void drawConnections (juce::Graphics& g)
+    {
+        if (focusedTrackIndex >= 0 || machine == nullptr)
+            return;
+
+        for (const auto& connection : machine->orbitConnections)
+        {
+            auto* sourceLayout = layoutForState (connection.sourceState);
+            auto* targetLayout = layoutForState (connection.targetState);
+            if (sourceLayout == nullptr || targetLayout == nullptr)
+                continue;
+            if (connection.sourceLane < 0 || connection.sourceLane >= machine->getLaneCount (connection.sourceState))
+                continue;
+
+            const auto sourceColour = graphColour (connection.sourceLane, connection.sourceState).interpolatedWith (accentB(), 0.18f);
+            const auto targetColour = graphColour (connection.targetState).interpolatedWith (accentA(), 0.12f);
+            const auto root = pointOnTrack (machine->state (connection.sourceState),
+                                            *sourceLayout,
+                                            connection.sourcePhase,
+                                            static_cast<float> (connection.sourceLane) * sourceLayout->laneGap);
+            drawConnectionPath (g, root, targetLayout->centre, sourceColour, targetColour, connection.action, false);
+        }
+
+        if (pendingConnection.active)
+        {
+            auto* sourceLayout = layoutForState (pendingConnection.sourceState);
+            if (sourceLayout != nullptr
+                && pendingConnection.sourceLane >= 0
+                && pendingConnection.sourceLane < machine->getLaneCount (pendingConnection.sourceState))
+            {
+                const auto root = pointOnTrack (machine->state (pendingConnection.sourceState),
+                                                *sourceLayout,
+                                                pendingConnection.sourcePhase,
+                                                static_cast<float> (pendingConnection.sourceLane) * sourceLayout->laneGap);
+                drawConnectionPath (g, root, pendingConnection.mouse,
+                                    graphColour (pendingConnection.sourceLane, pendingConnection.sourceState),
+                                    accentB(), OrbitConnectionAction::start, true);
+            }
+        }
+    }
+
+    void drawConnectionPath (juce::Graphics& g,
+                             juce::Point<float> from,
+                             juce::Point<float> to,
+                             juce::Colour fromColour,
+                             juce::Colour toColour,
+                             OrbitConnectionAction action,
+                             bool pending) const
+    {
+        auto delta = to - from;
+        const auto length = juce::jmax (1.0f, delta.getDistanceFromOrigin());
+        const auto normal = juce::Point<float> (-delta.y / length, delta.x / length);
+        const auto lift = juce::jlimit (-80.0f, 80.0f, (to.y - from.y) * 0.18f);
+        const auto control = (from + to) * 0.5f + normal * (pending ? 18.0f : 34.0f) + juce::Point<float> (0.0f, lift);
+
+        juce::Path path;
+        path.startNewSubPath (from);
+        path.quadraticTo (control, to);
+
+        g.setColour (juce::Colour (0xff05070a).withAlpha (pending ? 0.32f : 0.22f));
+        g.strokePath (path, juce::PathStrokeType (pending ? 4.0f : 3.2f,
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+
+        g.setGradientFill (juce::ColourGradient (fromColour.withAlpha (pending ? 0.70f : 0.54f), from,
+                                                 toColour.withAlpha (pending ? 0.78f : 0.62f), to,
+                                                 false));
+        g.strokePath (path, juce::PathStrokeType (pending ? 1.55f : 1.15f,
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+
+        const auto head = from + (to - from) * 0.86f;
+        g.setColour (toColour.withAlpha (pending ? 0.88f : 0.72f));
+        g.fillEllipse (head.x - 2.4f, head.y - 2.4f, 4.8f, 4.8f);
+
+        if (! pending)
+        {
+            const auto label = orbitConnectionActionLabel (action).substring (0, 1);
+            auto badge = juce::Rectangle<float> (0.0f, 0.0f, 16.0f, 16.0f).withCentre (control);
+            g.setColour (juce::Colour (0xff101318).withAlpha (0.82f));
+            g.fillEllipse (badge);
+            g.setColour (toColour.withAlpha (0.82f));
+            g.drawEllipse (badge, 0.75f);
+            g.setColour (ink().withAlpha (0.80f));
+            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.drawFittedText (label, badge.toNearestInt(), juce::Justification::centred, 1);
+        }
+    }
+
+    void drawTracks (juce::Graphics& g)
+    {
+        for (const auto& layout : trackLayouts)
+        {
+            const auto stateIndex = layout.stateIndex;
+            const auto& state = machine->state (stateIndex);
+            const auto selected = stateIndex == machine->selectedState;
+            const auto colour = graphColour (stateIndex);
+
+            g.setColour (selected ? rowFill().interpolatedWith (colour, 0.045f).withAlpha (0.28f)
+                                  : rowFill().withAlpha (0.09f));
+            g.fillEllipse (layout.centre.x - layout.outerRadius, layout.centre.y - layout.outerRadius,
+                           layout.outerRadius * 2.0f, layout.outerRadius * 2.0f);
+
+            for (int laneIndex = static_cast<int> (state.lanes.size()) - 1; laneIndex >= 0; --laneIndex)
+            {
+                const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+                auto laneColour = graphColour (laneIndex, stateIndex).interpolatedWith (ink(), 0.04f);
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                if (! lane.enabled || lane.muted)
+                    laneColour = mutedInk().withAlpha (0.24f);
+
+                auto path = makeTrackPath (state, layout, laneOffset);
+                drawLaneWaveform (g, state, lane, layout, laneIndex, laneColour);
+                g.setColour (laneColour.withAlpha (laneIndex == machine->selectedLane && selected ? 0.98f : 0.58f));
+                g.strokePath (path, juce::PathStrokeType (laneIndex == machine->selectedLane && selected ? 1.8f : 1.2f,
+                                                          juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+                drawBeatMarkers (g, state, layout, laneIndex, laneColour);
+                drawLaneMarker (g, state, lane, layout, laneIndex, laneColour, selected && laneIndex == machine->selectedLane);
+            }
+
+            for (int laneIndex = static_cast<int> (state.lanes.size()) - 1; laneIndex >= 0; --laneIndex)
+            {
+                auto laneColour = graphColour (laneIndex, stateIndex).interpolatedWith (ink(), 0.04f);
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                if (! lane.enabled || lane.muted)
+                    laneColour = mutedInk().withAlpha (0.24f);
+
+                drawTrimHandles (g, state, layout, laneIndex, laneColour,
+                                 state.index == selectedRenderedTrack && laneIndex == selectedRenderedLane);
+            }
+
+            auto outer = makeTrackPath (state, layout, 0.0f);
+            g.setColour (colour.interpolatedWith (ink(), 0.08f).withAlpha (selected ? 0.90f : 0.48f));
+            g.strokePath (outer, juce::PathStrokeType (selected ? 1.55f : 1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (shapeEditMode || selected)
+                drawWarpHandles (g, state, layout, colour, selected);
+            drawPlayhead (g, state, layout, colour);
+            drawTrackLabel (g, state, layout, stateIndex, selected);
+        }
+    }
+
+    void drawTrackLabel (juce::Graphics& g, const State& state, const TrackLayout& layout, int index, bool selected) const
+    {
+        auto text = juce::Rectangle<float> (layout.centre.x - layout.outerRadius,
+                                            layout.centre.y + layout.outerRadius + 4.0f,
+                                            layout.outerRadius * 2.0f, 32.0f).toNearestInt();
+        g.setColour ((selected ? ink() : mutedInk()).withAlpha (selected ? 0.94f : 0.68f));
+        g.setFont (juce::FontOptions (12.0f, selected ? juce::Font::bold : juce::Font::plain));
+        g.drawFittedText (state.name, text.removeFromTop (18), juce::Justification::centred, 1);
+        g.setColour (mutedInk().withAlpha (0.52f));
+        g.setFont (juce::FontOptions (9.8f));
+        g.drawFittedText (juce::String (state.tempoBpm, 0) + " BPM  " + juce::String (state.beatsPerBar) + "/" + juce::String (state.beatUnit)
+                            + "  " + juce::String (state.lanes.size()) + (state.lanes.size() == 1 ? " lane" : " lanes"),
+                          text, juce::Justification::centred, 1);
+        juce::ignoreUnused (index);
+    }
+
+    void drawWarpHandles (juce::Graphics& g, const State& state, const TrackLayout& layout, juce::Colour colour, bool selected) const
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            const auto angle = angleForWarpIndex (i);
+            const auto phase = std::fmod ((angle + juce::MathConstants<float>::halfPi + juce::MathConstants<float>::twoPi),
+                                          juce::MathConstants<float>::twoPi) / juce::MathConstants<float>::twoPi;
+            auto p = pointOnTrack (state, layout, phase);
+            const auto editing = shapeEditMode && selected;
+            const auto size = editing ? 8.8f : (selected ? 4.8f : 3.2f);
+            if (editing)
+            {
+                const auto base = layout.centre + juce::Point<float> (std::cos (angle), std::sin (angle)) * layout.radius;
+                g.setColour (colour.withAlpha (0.18f));
+                g.drawLine (base.x, base.y, p.x, p.y, 1.0f);
+                g.setColour (juce::Colour (0xff07090c).withAlpha (0.78f));
+                g.fillEllipse (p.x - size * 0.5f - 1.5f, p.y - size * 0.5f - 1.5f, size + 3.0f, size + 3.0f);
+            }
+
+            g.setColour (editing ? colour.brighter (0.35f).withAlpha (0.96f)
+                                 : (selected ? colour.withAlpha (0.82f) : colour.withAlpha (0.44f)));
+            g.fillEllipse (p.x - size * 0.5f, p.y - size * 0.5f, size, size);
+            if (editing)
+            {
+                g.setColour (ink().withAlpha (0.72f));
+                g.drawEllipse (p.x - size * 0.5f, p.y - size * 0.5f, size, size, 1.0f);
+            }
+        }
+    }
+
+    void drawPlayhead (juce::Graphics& g, const State& state, const TrackLayout& layout, juce::Colour colour) const
+    {
+        const auto duration = juce::jmax (0.1, state.secondsPerSection() / rate);
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        auto phase = machine->selectedState == state.index ? 0.0f : -1.0f;
+        if (transportRunning)
+        {
+            if (const auto override = statePlayheads.find (state.index); override != statePlayheads.end())
+            {
+                phase = phaseFromOverride (override->second, duration, now);
+            }
+            else
+            {
+                const auto elapsed = (now - visualTransportStartMs) * 0.001;
+                phase = static_cast<float> (std::fmod (juce::jmax (0.0, elapsed), duration) / duration);
+            }
+        }
+        if (phase < 0.0f)
+            return;
+
+        const auto p = pointOnTrack (state, layout, phase, static_cast<float> (state.lanes.size()) * layout.laneGap + 3.0f);
+        g.setColour (colour.brighter (0.22f).withAlpha (0.96f));
+        g.drawLine (layout.centre.x, layout.centre.y, p.x, p.y, 0.8f);
+        g.fillEllipse (p.x - 3.6f, p.y - 3.6f, 7.2f, 7.2f);
+        g.setColour (juce::Colour (0xff101318).withAlpha (0.62f));
+        g.drawEllipse (p.x - 3.6f, p.y - 3.6f, 7.2f, 7.2f, 0.8f);
+    }
+
+    float currentPlayheadPhaseForState (int stateIndex) const
+    {
+        if (machine == nullptr || stateIndex < 0 || stateIndex >= machine->getStateCount())
+            return 0.0f;
+
+        const auto duration = juce::jmax (0.1, machine->state (stateIndex).secondsPerSection() / rate);
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+
+        if (const auto override = statePlayheads.find (stateIndex); override != statePlayheads.end())
+            return phaseFromOverride (override->second, duration, now);
+
+        const auto elapsed = (now - visualTransportStartMs) * 0.001;
+        return static_cast<float> (std::fmod (juce::jmax (0.0, elapsed), duration) / duration);
+    }
+
+    float phaseFromOverride (const StatePlayhead& playhead, double duration, double now) const
+    {
+        if (playhead.mode == PlayheadMode::paused)
+            return juce::jlimit (0.0f, 0.9999f, playhead.startPhase);
+
+        const auto elapsed = juce::jmax (0.0, (now - playhead.startedMs) * 0.001);
+        const auto progress = static_cast<float> (std::fmod (elapsed, duration) / duration);
+        auto phase = playhead.mode == PlayheadMode::reverse ? playhead.startPhase - progress
+                                                            : playhead.startPhase + progress;
+        while (phase < 0.0f)
+            phase += 1.0f;
+        while (phase >= 1.0f)
+            phase -= 1.0f;
+        return phase;
+    }
+
+    void drawLaneMarker (juce::Graphics& g,
+                         const State& state,
+                         const Lane& lane,
+                         const TrackLayout& layout,
+                         int laneIndex,
+                         juce::Colour colour,
+                         bool selected) const
+    {
+        const auto p = pointOnTrack (state, layout, lane.orbitPhase, static_cast<float> (laneIndex) * layout.laneGap);
+        const auto size = selected ? 7.4f : 5.6f;
+        g.setColour (colour.withAlpha (lane.freezeInProgress ? 0.46f : 0.98f));
+        g.fillEllipse (p.x - size * 0.5f, p.y - size * 0.5f, size, size);
+        g.setColour (selected ? ink().withAlpha (0.68f) : juce::Colour (0xff101318).withAlpha (0.46f));
+        g.drawEllipse (p.x - size * 0.5f, p.y - size * 0.5f, size, size, selected ? 0.9f : 0.55f);
+    }
+
+    void drawBeatMarkers (juce::Graphics& g,
+                          const State& state,
+                          const TrackLayout& layout,
+                          int laneIndex,
+                          juce::Colour colour) const
+    {
+        const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+        const auto beatSeconds = 60.0 / juce::jlimit (20.0, 320.0, state.tempoBpm);
+        const auto totalBeats = state.durationUsesSeconds
+            ? state.secondsPerSection() / beatSeconds
+            : state.clockBeatsPerSection();
+        const auto markerCount = juce::jlimit (1, 256, static_cast<int> (std::ceil (totalBeats)));
+        const auto barBeats = juce::jmax (1.0, static_cast<double> (state.beatsPerBar) * (4.0 / static_cast<double> (juce::jlimit (1, 32, state.beatUnit))));
+
+        for (int beat = 0; beat <= markerCount; ++beat)
+        {
+            const auto phase = juce::jlimit (0.0f, 1.0f, static_cast<float> (static_cast<double> (beat) / juce::jmax (1.0, totalBeats)));
+            const auto angle = phase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+            const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+            const auto base = pointOnTrack (state, layout, phase, laneOffset);
+            const auto isBar = std::abs (std::fmod (static_cast<double> (beat), barBeats)) < 0.001 || beat == markerCount;
+            const auto length = isBar ? 6.2f : 3.0f;
+            const auto inner = base - normal * (length * 0.45f);
+            const auto outer = base + normal * (length * 0.55f);
+            g.setColour (colour.withAlpha (isBar ? 0.58f : 0.28f));
+            g.drawLine (inner.x, inner.y, outer.x, outer.y, isBar ? 0.95f : 0.55f);
+        }
+    }
+
+    void drawLaneWaveform (juce::Graphics& g,
+                           const State& state,
+                           const Lane& lane,
+                           const TrackLayout& layout,
+                           int laneIndex,
+                           juce::Colour colour)
+    {
+        if ((! lane.frozen || lane.frozenAudioPath.isEmpty()) && ! lane.freezeInProgress)
+            return;
+
+        const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+        auto* waveform = lane.frozen && lane.frozenAudioPath.isNotEmpty() ? waveformFor (lane) : nullptr;
+        if ((waveform == nullptr || waveform->peaks.empty()) && ! lane.freezeInProgress)
+            return;
+
+        const auto samples = waveform != nullptr && ! waveform->peaks.empty()
+            ? static_cast<int> (waveform->peaks.size())
+            : 96;
+        const auto halfWidth = pipeHalfWidth (layout);
+        const auto amplitude = pipeAmplitude (layout);
+        const auto phaseOffset = lane.orbitPhase;
+        const auto phaseSpan = lanePhaseSpan (state, lane);
+        const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+        const auto durationSeconds = juce::jmax (0.01, static_cast<double> (phaseSpan) * trackSeconds);
+        const auto fadeInRatio = static_cast<float> (juce::jlimit (0.0, 0.5, lane.fadeInSeconds / durationSeconds));
+        const auto fadeOutRatio = static_cast<float> (juce::jlimit (0.0, 0.5, lane.fadeOutSeconds / durationSeconds));
+
+        juce::Path outer;
+        juce::Path audibleOuter;
+        std::vector<juce::Point<float>> innerPoints;
+        std::vector<juce::Point<float>> audiblePoints;
+        innerPoints.reserve (static_cast<size_t> (samples + 1));
+        audiblePoints.reserve (static_cast<size_t> (samples + 1));
+        for (int i = 0; i <= samples; ++i)
+        {
+            const auto phase = static_cast<float> (i) / static_cast<float> (samples);
+            const auto wrappedPhase = std::fmod (phaseOffset + phase * phaseSpan, 1.0f);
+            const auto peak = lane.freezeInProgress && (waveform == nullptr || waveform->peaks.empty())
+                ? (0.18f + 0.10f * std::sin (phase * juce::MathConstants<float>::twoPi * 8.0f))
+                : juce::jlimit (0.0f, 1.0f, waveform->peaks[static_cast<size_t> (i % samples)]);
+
+            const auto angle = wrappedPhase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+            const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+            const auto base = pointOnTrack (state, layout, wrappedPhase, laneOffset);
+            const auto outerPoint = base + normal * (halfWidth + peak * amplitude);
+            const auto innerPoint = base - normal * (halfWidth + peak * amplitude * 0.30f);
+            auto fadeScale = 1.0f;
+            if (fadeInRatio > 0.0001f && phase < fadeInRatio)
+                fadeScale = juce::jmin (fadeScale, phase / fadeInRatio);
+            if (fadeOutRatio > 0.0001f && phase > 1.0f - fadeOutRatio)
+                fadeScale = juce::jmin (fadeScale, (1.0f - phase) / fadeOutRatio);
+            fadeScale = juce::jlimit (0.0f, 1.0f, fadeScale);
+            const auto audiblePoint = base + normal * (halfWidth + peak * amplitude * fadeScale);
+
+            if (i == 0)
+            {
+                outer.startNewSubPath (outerPoint);
+                audibleOuter.startNewSubPath (audiblePoint);
+            }
+            else
+            {
+                outer.lineTo (outerPoint);
+                audibleOuter.lineTo (audiblePoint);
+            }
+
+            innerPoints.push_back (innerPoint);
+            audiblePoints.push_back (audiblePoint);
+        }
+
+        juce::Path pipe = outer;
+        for (auto point = innerPoints.rbegin(); point != innerPoints.rend(); ++point)
+            pipe.lineTo (*point);
+        pipe.closeSubPath();
+
+        g.setColour (colour.withAlpha (lane.freezeInProgress ? 0.10f : 0.18f));
+        g.fillPath (pipe);
+        if (fadeInRatio > 0.0001f || fadeOutRatio > 0.0001f)
+        {
+            juce::Path dulled = outer;
+            for (auto point = audiblePoints.rbegin(); point != audiblePoints.rend(); ++point)
+                dulled.lineTo (*point);
+            dulled.closeSubPath();
+
+            g.setColour (juce::Colour (0xff05070a).withAlpha (0.16f));
+            g.fillPath (dulled);
+            g.setColour (colour.withAlpha (0.24f));
+            g.strokePath (audibleOuter, juce::PathStrokeType (0.75f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        const auto renderedSelected = state.index == selectedRenderedTrack && laneIndex == selectedRenderedLane;
+        g.setColour (colour.withAlpha (renderedSelected ? 0.34f : 0.090f));
+        g.strokePath (laneSegmentCentrePath (state, layout, phaseOffset, phaseSpan, laneOffset),
+                      juce::PathStrokeType (pipeHalfWidth (layout) * 1.55f + pipeAmplitude (layout) * 0.55f,
+                                            juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded));
+        if (renderedSelected)
+        {
+            g.setColour (colour.brighter (0.24f).withAlpha (0.90f));
+            g.strokePath (laneSegmentCentrePath (state, layout, phaseOffset, phaseSpan, laneOffset),
+                          juce::PathStrokeType (0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        g.setColour (colour.brighter (0.18f).withAlpha (lane.freezeInProgress ? 0.34f : 0.82f));
+        g.strokePath (outer, juce::PathStrokeType (0.95f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (juce::Colour (0xff101318).withAlpha (0.16f));
+        juce::Path inner;
+        for (int i = 0; i < static_cast<int> (innerPoints.size()); ++i)
+        {
+            if (i == 0)
+                inner.startNewSubPath (innerPoints[static_cast<size_t> (i)]);
+            else
+                inner.lineTo (innerPoints[static_cast<size_t> (i)]);
+        }
+        g.strokePath (inner, juce::PathStrokeType (0.58f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void drawTrimHandles (juce::Graphics& g,
+                          const State& state,
+                          const TrackLayout& layout,
+                          int laneIndex,
+                          juce::Colour,
+                          bool selected) const
+    {
+        const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+        if (! isPlacedLane (lane))
+            return;
+
+        const auto start = waveformTrimHandlePoint (state, lane, layout, laneIndex, true);
+        const auto end = waveformTrimHandlePoint (state, lane, layout, laneIndex, false);
+        const auto fadeIn = waveformFadeHandlePoint (state, lane, layout, laneIndex, true);
+        const auto fadeOut = waveformFadeHandlePoint (state, lane, layout, laneIndex, false);
+        const auto zoomScale = focusedTrackIndex >= 0 ? juce::jlimit (0.46f, 1.0f, std::sqrt (focusedViewZoom)) : 1.0f;
+        const auto trimLength = (selected ? 11.0f : 8.0f) * zoomScale;
+        const auto fadeLength = (selected ? 8.0f : 6.0f) * zoomScale;
+
+        auto strokeSoftLine = [&] (juce::Point<float> a,
+                                   juce::Point<float> b,
+                                   juce::Colour colour,
+                                   float width,
+                                   float backingAlpha = 0.0f)
+        {
+            juce::Path line;
+            line.startNewSubPath (a);
+            line.lineTo (b);
+
+            if (backingAlpha > 0.0f)
+            {
+                g.setColour (juce::Colour (0xff05070a).withAlpha (backingAlpha));
+                g.strokePath (line, juce::PathStrokeType (width + 1.15f * zoomScale,
+                                                          juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            }
+
+            g.setColour (colour);
+            g.strokePath (line, juce::PathStrokeType (width,
+                                                      juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
+        };
+
+        auto drawTick = [&] (juce::Point<float> p, bool isStart, bool fade)
+        {
+            const auto angle = phaseForPoint (p, layout.centre) * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+            const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+            const auto length = fade ? fadeLength : trimLength;
+            const auto centre = p + normal * (fade ? 0.75f * zoomScale : 0.0f);
+            const auto a = centre - normal * (length * 0.5f);
+            const auto b = centre + normal * (length * 0.5f);
+            const auto c = fade
+                ? (isStart ? juce::Colour (0xffb9fbff) : juce::Colour (0xffffe58a)).withAlpha (selected ? 0.82f : 0.58f)
+                : (isStart ? juce::Colour (0xff1ff6ff) : juce::Colour (0xffffcd26)).withAlpha (selected ? 1.0f : 0.78f);
+
+            strokeSoftLine (a, b, c, (fade ? 1.0f : 1.18f) * zoomScale, selected ? 0.30f : 0.18f);
+        };
+
+        auto drawFadeRamp = [&] (juce::Point<float> boundary, juce::Point<float> p, bool isIn)
+        {
+            const auto low = isIn ? boundary : p;
+            const auto high = isIn ? p : boundary;
+
+            const auto c = (isIn ? juce::Colour (0xffb9fbff) : juce::Colour (0xffffe58a)).withAlpha (selected ? 0.72f : 0.46f);
+            strokeSoftLine (low, high, c, 0.74f * zoomScale, selected ? 0.18f : 0.10f);
+        };
+
+        drawFadeRamp (start, fadeIn, true);
+        drawFadeRamp (end, fadeOut, false);
+        drawTick (start, true, false);
+        drawTick (end, false, false);
+        drawTick (fadeIn, true, true);
+        drawTick (fadeOut, false, true);
+    }
+
+    float lanePhaseSpan (const State& state, const Lane& lane) const
+    {
+        const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+        const auto remaining = juce::jmax (0.0001, 1.0 - juce::jlimit (0.0, 0.9999, static_cast<double> (lane.orbitPhase)));
+        const auto beatSeconds = 60.0 / juce::jlimit (20.0, 320.0, state.tempoBpm);
+        const auto totalBeats = state.durationUsesSeconds ? trackSeconds / beatSeconds : state.clockBeatsPerSection();
+        const auto currentBeat = static_cast<double> (lane.orbitPhase) * totalBeats;
+        const auto barBeats = juce::jmax (1.0, static_cast<double> (state.beatsPerBar) * (4.0 / static_cast<double> (juce::jlimit (1, 32, state.beatUnit))));
+
+        auto seconds = trackSeconds * remaining;
+        switch (lane.durationMode)
+        {
+            case LaneDurationMode::endOfBeat:
+                seconds = (std::ceil (currentBeat + 0.0001) - currentBeat) * beatSeconds;
+                break;
+
+            case LaneDurationMode::endOfBar:
+                seconds = (std::ceil ((currentBeat + 0.0001) / barBeats) * barBeats - currentBeat) * beatSeconds;
+                break;
+
+            case LaneDurationMode::fixedBars:
+                seconds = juce::jmax (0.01, lane.durationValue) * state.secondsPerBar();
+                break;
+
+            case LaneDurationMode::fixedSeconds:
+                seconds = juce::jmax (0.01, lane.durationValue);
+                break;
+
+            case LaneDurationMode::natural:
+                seconds = trackSeconds * remaining;
+                break;
+        }
+
+        return static_cast<float> (juce::jlimit (0.002, remaining, seconds / trackSeconds));
+    }
+
+    float pipeHalfWidth (const TrackLayout& layout) const
+    {
+        if (focusedTrackIndex >= 0)
+        {
+            const auto zoom = juce::jlimit (0.55f, 5.0f, focusedViewZoom);
+            const auto inward = juce::jlimit (0.0f, 1.0f, (zoom - 1.0f) / 4.0f);
+            const auto outward = juce::jlimit (0.0f, 1.0f, (1.0f - zoom) / 0.45f);
+            const auto height = layout.laneGap * (0.085f + 0.060f * inward);
+            return juce::jlimit (2.8f, 36.0f, height * (1.0f - 0.18f * outward));
+        }
+
+        return juce::jlimit (2.8f, 5.5f, layout.laneGap * 0.085f);
+    }
+
+    float pipeCoreWidth (const TrackLayout& layout) const
+    {
+        return juce::jlimit (1.2f, 2.6f, layout.laneGap * 0.05f);
+    }
+
+    float pipeAmplitude (const TrackLayout& layout) const
+    {
+        if (focusedTrackIndex >= 0)
+        {
+            const auto zoom = juce::jlimit (0.55f, 5.0f, focusedViewZoom);
+            const auto inward = juce::jlimit (0.0f, 1.0f, (zoom - 1.0f) / 4.0f);
+            const auto outward = juce::jlimit (0.0f, 1.0f, (1.0f - zoom) / 0.45f);
+            const auto height = layout.laneGap * (0.18f + 0.09f * inward) * (1.0f + 0.30f * inward);
+            return juce::jlimit (5.0f, 210.0f, height * (1.0f - 0.22f * outward));
+        }
+
+        return juce::jlimit (5.0f, 11.0f, layout.laneGap * 0.18f);
+    }
+
+    struct WaveformData
+    {
+        std::vector<float> peaks;
+    };
+
+    WaveformData* waveformFor (const Lane& lane)
+    {
+        constexpr int peakCount = 128;
+        const auto path = lane.frozenAudioPath.toStdString();
+        auto found = waveforms.find (path);
+        if (found != waveforms.end())
+            return found->second.get();
+
+        auto data = std::make_unique<WaveformData>();
+        auto file = juce::File (lane.frozenAudioPath);
+        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (formatManager.createReaderFor (file)))
+        {
+            data->peaks.resize (peakCount, 0.0f);
+            juce::AudioBuffer<float> buffer (static_cast<int> (juce::jmax (1u, reader->numChannels)), 2048);
+            const auto totalSamples = juce::jmax<juce::int64> (1, reader->lengthInSamples);
+
+            for (int bucket = 0; bucket < peakCount; ++bucket)
+            {
+                const auto start = totalSamples * bucket / peakCount;
+                const auto end = totalSamples * (bucket + 1) / peakCount;
+                auto remaining = end - start;
+                auto position = start;
+                auto peak = 0.0f;
+
+                while (remaining > 0)
+                {
+                    const auto block = static_cast<int> (juce::jmin<juce::int64> (buffer.getNumSamples(), remaining));
+                    buffer.clear();
+                    if (! reader->read (&buffer, 0, block, position, true, true))
+                        break;
+
+                    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                        peak = juce::jmax (peak, buffer.getMagnitude (channel, 0, block));
+
+                    position += block;
+                    remaining -= block;
+                }
+
+                data->peaks[static_cast<size_t> (bucket)] = peak;
+            }
+
+            const auto maxPeak = *std::max_element (data->peaks.begin(), data->peaks.end());
+            if (maxPeak > 0.0001f)
+            {
+                for (auto& peak : data->peaks)
+                    peak = std::sqrt (juce::jlimit (0.0f, 1.0f, peak / maxPeak));
+            }
+        }
+
+        found = waveforms.emplace (path, std::move (data)).first;
+        return found->second.get();
+    }
+
+    Hit orbitHitTest (juce::Point<float> point) const
+    {
+        Hit best;
+        auto bestDistance = 100000.0f;
+        for (const auto& layout : trackLayouts)
+        {
+            const auto stateIndex = layout.stateIndex;
+            const auto& state = machine->state (stateIndex);
+            auto delta = point - layout.centre;
+            auto angle = std::atan2 (delta.y, delta.x);
+            auto phase = (angle + juce::MathConstants<float>::halfPi) / juce::MathConstants<float>::twoPi;
+            while (phase < 0.0f) phase += 1.0f;
+            while (phase >= 1.0f) phase -= 1.0f;
+
+            for (int laneIndex = 0; laneIndex < juce::jmax (1, static_cast<int> (state.lanes.size())); ++laneIndex)
+            {
+                const auto radius = radiusForAngle (state, layout.radius + static_cast<float> (laneIndex) * layout.laneGap, angle);
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                const auto tolerance = isPlacedLane (lane) ? juce::jmin (layout.laneGap * 0.42f, pipeHalfWidth (layout) + pipeAmplitude (layout) * 0.86f) : 14.0f;
+                const auto distance = std::abs (delta.getDistanceFromOrigin() - radius);
+                if (distance < bestDistance && distance < tolerance)
+                {
+                    bestDistance = distance;
+                    best = { stateIndex, laneIndex < static_cast<int> (state.lanes.size()) ? laneIndex : -1, phase };
+                }
+            }
+        }
+
+        return best;
+    }
+
+    int stateAtPoint (juce::Point<float> point) const
+    {
+        auto best = -1;
+        auto bestDistance = std::numeric_limits<float>::max();
+        for (const auto& layout : trackLayouts)
+        {
+            const auto distance = point.getDistanceFrom (layout.centre);
+            if (distance <= layout.outerRadius && distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = layout.stateIndex;
+            }
+        }
+
+        return best;
+    }
+
+    Hit waveformHitTest (juce::Point<float> point) const
+    {
+        Hit best;
+        auto bestDistance = 100000.0f;
+
+        for (const auto& layout : trackLayouts)
+        {
+            const auto stateIndex = layout.stateIndex;
+            const auto& state = machine->state (stateIndex);
+
+            for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+            {
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                if (! isPlacedLane (lane))
+                    continue;
+
+                const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+                const auto span = lanePhaseSpan (state, lane);
+                const auto distance = distanceToLaneSegment (state, layout, lane.orbitPhase, span, laneOffset, point);
+                const auto tolerance = juce::jmin (focusedTrackIndex >= 0 ? 34.0f : 24.0f,
+                                                   layout.laneGap * 0.48f);
+
+                if (distance >= bestDistance || distance > tolerance)
+                    continue;
+
+                bestDistance = distance;
+                best = { stateIndex, laneIndex, phaseForPoint (point, layout.centre) };
+            }
+        }
+
+        return best;
+    }
+
+    TrimHit trimHandleHitTest (juce::Point<float> point) const
+    {
+        TrimHit best;
+        auto bestDistance = 100000.0f;
+
+        for (const auto& layout : trackLayouts)
+        {
+            const auto stateIndex = layout.stateIndex;
+            const auto& state = machine->state (stateIndex);
+
+            for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+            {
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                if (! isPlacedLane (lane))
+                    continue;
+
+                const auto start = waveformTrimHandlePoint (state, lane, layout, laneIndex, true);
+                const auto end = waveformTrimHandlePoint (state, lane, layout, laneIndex, false);
+                const auto fadeIn = waveformFadeHandlePoint (state, lane, layout, laneIndex, true);
+                const auto fadeOut = waveformFadeHandlePoint (state, lane, layout, laneIndex, false);
+                const auto zoomScale = focusedTrackIndex >= 0 ? juce::jlimit (0.56f, 1.0f, std::sqrt (focusedViewZoom)) : 1.0f;
+                const auto tolerance = (focusedTrackIndex >= 0 ? 28.0f : 22.0f) * zoomScale;
+                const auto fadeTolerance = (focusedTrackIndex >= 0 ? 24.0f : 18.0f) * zoomScale;
+
+                const auto fadeInDistance = point.getDistanceFrom (fadeIn);
+                if (fadeInDistance < bestDistance && fadeInDistance <= fadeTolerance)
+                {
+                    bestDistance = fadeInDistance;
+                    best = { stateIndex, laneIndex, TrimHandle::fadeIn };
+                }
+
+                const auto fadeOutDistance = point.getDistanceFrom (fadeOut);
+                if (fadeOutDistance < bestDistance && fadeOutDistance <= fadeTolerance)
+                {
+                    bestDistance = fadeOutDistance;
+                    best = { stateIndex, laneIndex, TrimHandle::fadeOut };
+                }
+
+                const auto startDistance = point.getDistanceFrom (start);
+                if (startDistance < bestDistance && startDistance <= tolerance)
+                {
+                    bestDistance = startDistance;
+                    best = { stateIndex, laneIndex, TrimHandle::start };
+                }
+
+                const auto endDistance = point.getDistanceFrom (end);
+                if (endDistance < bestDistance && endDistance <= tolerance)
+                {
+                    bestDistance = endDistance;
+                    best = { stateIndex, laneIndex, TrimHandle::end };
+                }
+            }
+        }
+
+        return best;
+    }
+
+    juce::Path laneSegmentHitPath (const State& state,
+                                   const TrackLayout& layout,
+                                   float startPhase,
+                                   float phaseSpan,
+                                   float laneOffset) const
+    {
+        auto centre = laneSegmentCentrePath (state, layout, startPhase, phaseSpan, laneOffset);
+        juce::Path hitPath;
+        juce::PathStrokeType (juce::jmin (layout.laneGap * 0.78f,
+                                          pipeHalfWidth (layout) * 2.0f + pipeAmplitude (layout) * 1.6f + 8.0f),
+                              juce::PathStrokeType::curved,
+                              juce::PathStrokeType::rounded).createStrokedPath (hitPath, centre);
+        return hitPath;
+    }
+
+    juce::Point<float> waveformTrimHandlePoint (const State& state,
+                                                const Lane& lane,
+                                                const TrackLayout& layout,
+                                                int laneIndex,
+                                                bool start) const
+    {
+        const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+        const auto phase = start ? lane.orbitPhase
+                                 : juce::jlimit (lane.orbitPhase + 0.002f, 0.9999f, lane.orbitPhase + lanePhaseSpan (state, lane));
+        auto* waveform = lane.frozen && lane.frozenAudioPath.isNotEmpty() ? const_cast<OrbitTrackCanvas*> (this)->waveformFor (lane) : nullptr;
+        auto peak = 0.72f;
+        if (waveform != nullptr && ! waveform->peaks.empty())
+        {
+            const auto index = start ? 0 : static_cast<int> (waveform->peaks.size()) - 1;
+            peak = juce::jlimit (0.35f, 1.0f, waveform->peaks[static_cast<size_t> (juce::jlimit (0, static_cast<int> (waveform->peaks.size()) - 1, index))]);
+        }
+
+        const auto angle = phase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+        const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+        const auto base = pointOnTrack (state, layout, phase, laneOffset);
+        const auto outerPoint = base + normal * (pipeHalfWidth (layout) + peak * pipeAmplitude (layout));
+        const auto innerPoint = base - normal * (pipeHalfWidth (layout) + peak * pipeAmplitude (layout) * 0.30f);
+        return (outerPoint + innerPoint) * 0.5f;
+    }
+
+    juce::Point<float> waveformFadeHandlePoint (const State& state,
+                                                const Lane& lane,
+                                                const TrackLayout& layout,
+                                                int laneIndex,
+                                                bool fadeIn) const
+    {
+        const auto laneOffset = static_cast<float> (laneIndex) * layout.laneGap;
+        const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+        const auto span = lanePhaseSpan (state, lane);
+        const auto startPhase = lane.orbitPhase;
+        const auto endPhase = juce::jlimit (startPhase + 0.002f, 0.9999f, startPhase + span);
+        const auto durationSeconds = juce::jmax (0.01, static_cast<double> (span) * trackSeconds);
+        const auto maxFade = durationSeconds * 0.5;
+        const auto fadeSeconds = juce::jlimit (0.0, maxFade, fadeIn ? lane.fadeInSeconds : lane.fadeOutSeconds);
+        const auto phase = fadeIn
+            ? juce::jlimit (startPhase, endPhase, startPhase + static_cast<float> (fadeSeconds / trackSeconds))
+            : juce::jlimit (startPhase, endPhase, endPhase - static_cast<float> (fadeSeconds / trackSeconds));
+
+        const auto angle = phase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+        const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+        return pointOnTrack (state, layout, phase, laneOffset)
+             + normal * (pipeHalfWidth (layout) + pipeAmplitude (layout) + 7.0f);
+    }
+
+    juce::Point<float> trimHandlePoint (const State& state,
+                                        const TrackLayout& layout,
+                                        float phase,
+                                        float laneOffset) const
+    {
+        const auto angle = phase * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+        const auto normal = juce::Point<float> (std::cos (angle), std::sin (angle));
+        return pointOnTrack (state, layout, phase, laneOffset)
+             + normal * (pipeHalfWidth (layout) + pipeAmplitude (layout) + 8.0f);
+    }
+
+    juce::Path laneSegmentCentrePath (const State& state,
+                                      const TrackLayout& layout,
+                                      float startPhase,
+                                      float phaseSpan,
+                                      float laneOffset) const
+    {
+        juce::Path path;
+        constexpr int samples = 160;
+
+        for (int i = 0; i <= samples; ++i)
+        {
+            const auto phase = startPhase + phaseSpan * static_cast<float> (i) / static_cast<float> (samples);
+            const auto point = pointOnTrack (state, layout, phase, laneOffset);
+            if (i == 0)
+                path.startNewSubPath (point);
+            else
+                path.lineTo (point);
+        }
+
+        return path;
+    }
+
+    static float phaseForPoint (juce::Point<float> point, juce::Point<float> centre)
+    {
+        auto delta = point - centre;
+        auto phase = (std::atan2 (delta.y, delta.x) + juce::MathConstants<float>::halfPi) / juce::MathConstants<float>::twoPi;
+        while (phase < 0.0f) phase += 1.0f;
+        while (phase >= 1.0f) phase -= 1.0f;
+        return juce::jlimit (0.0f, 0.9999f, phase);
+    }
+
+    float distanceToLaneSegment (const State& state,
+                                 const TrackLayout& layout,
+                                 float startPhase,
+                                 float phaseSpan,
+                                 float laneOffset,
+                                 juce::Point<float> point) const
+    {
+        constexpr int samples = 160;
+        auto best = 100000.0f;
+        auto previous = pointOnTrack (state, layout, startPhase, laneOffset);
+
+        for (int i = 1; i <= samples; ++i)
+        {
+            const auto phase = startPhase + phaseSpan * static_cast<float> (i) / static_cast<float> (samples);
+            const auto current = pointOnTrack (state, layout, phase, laneOffset);
+            best = juce::jmin (best, distanceToSegment (point, previous, current));
+            previous = current;
+        }
+
+        return best;
+    }
+
+    static float distanceToSegment (juce::Point<float> point, juce::Point<float> a, juce::Point<float> b)
+    {
+        const auto ab = b - a;
+        const auto lengthSquared = ab.getDotProduct (ab);
+        if (lengthSquared <= 0.0001f)
+            return point.getDistanceFrom (a);
+
+        const auto t = juce::jlimit (0.0f, 1.0f, (point - a).getDotProduct (ab) / lengthSquared);
+        return point.getDistanceFrom (a + ab * t);
+    }
+
+    int warpHandleAt (int layoutIndex, juce::Point<float> point) const
+    {
+        if (machine == nullptr || layoutIndex < 0 || layoutIndex >= static_cast<int> (trackLayouts.size()))
+            return -1;
+
+        const auto& layout = trackLayouts[static_cast<size_t> (layoutIndex)];
+        const auto& state = machine->state (layout.stateIndex);
+        for (int i = 0; i < 8; ++i)
+        {
+            const auto angle = angleForWarpIndex (i);
+            const auto phase = std::fmod ((angle + juce::MathConstants<float>::halfPi + juce::MathConstants<float>::twoPi),
+                                          juce::MathConstants<float>::twoPi) / juce::MathConstants<float>::twoPi;
+            if (point.getDistanceFrom (pointOnTrack (state, layout, phase)) <= (shapeEditMode ? 15.0f : 9.0f))
+                return i;
+        }
+
+        return -1;
+    }
+
+    TrackLayout* layoutForState (int stateIndex)
+    {
+        for (auto& layout : trackLayouts)
+            if (layout.stateIndex == stateIndex)
+                return &layout;
+
+        return nullptr;
+    }
+
+    static bool isPlacedLane (const Lane& lane)
+    {
+        return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+    }
+
+    void clearRenderedSelection()
+    {
+        selectedRenderedTrack = -1;
+        selectedRenderedLane = -1;
+    }
+
+    void updateDraggedLanePhase (juce::Point<float> point, bool finished)
+    {
+        auto* layout = layoutForState (draggingLaneTrack);
+        if (layout == nullptr || draggingLaneTrack < 0 || draggingLaneTrack >= machine->getStateCount())
+            return;
+
+        auto& state = machine->state (draggingLaneTrack);
+        if (draggingLaneIndex < 0 || draggingLaneIndex >= static_cast<int> (state.lanes.size()))
+            return;
+
+        auto delta = point - layout->centre;
+        auto phase = (std::atan2 (delta.y, delta.x) + juce::MathConstants<float>::halfPi) / juce::MathConstants<float>::twoPi;
+        while (phase < 0.0f) phase += 1.0f;
+        while (phase >= 1.0f) phase -= 1.0f;
+        phase = juce::jlimit (0.0f, 0.9999f, phase);
+
+        auto& lane = state.lanes[static_cast<size_t> (draggingLaneIndex)];
+        lane.orbitPhase = phase;
+        selectedRenderedTrack = draggingLaneTrack;
+        selectedRenderedLane = draggingLaneIndex;
+
+        if (onLanePhaseChanged)
+            onLanePhaseChanged (draggingLaneTrack, draggingLaneIndex, phase, finished);
+
+        repaint();
+    }
+
+    void updateDraggedTrim (juce::Point<float> point, bool finished)
+    {
+        auto* layout = layoutForState (draggingLaneTrack);
+        if (layout == nullptr || draggingLaneTrack < 0 || draggingLaneTrack >= machine->getStateCount())
+            return;
+
+        auto& state = machine->state (draggingLaneTrack);
+        if (draggingLaneIndex < 0 || draggingLaneIndex >= static_cast<int> (state.lanes.size()))
+            return;
+
+        auto phase = phaseForPoint (point, layout->centre);
+        constexpr float minSpan = 0.0025f;
+        if (draggingTrim == TrimHandle::start)
+            trimStartPhase = juce::jlimit (0.0f, trimEndPhase - minSpan, phase);
+        else if (draggingTrim == TrimHandle::end)
+            trimEndPhase = juce::jlimit (trimStartPhase + minSpan, 0.9999f, phase);
+
+        auto& lane = state.lanes[static_cast<size_t> (draggingLaneIndex)];
+        selectedRenderedTrack = draggingLaneTrack;
+        selectedRenderedLane = draggingLaneIndex;
+
+        if (draggingTrim == TrimHandle::fadeIn || draggingTrim == TrimHandle::fadeOut)
+        {
+            const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+            const auto safePhase = juce::jlimit (trimStartPhase, trimEndPhase, phase);
+            const auto durationSeconds = juce::jmax (0.01, static_cast<double> (trimEndPhase - trimStartPhase) * trackSeconds);
+            const auto maxFade = durationSeconds * 0.5;
+            if (draggingTrim == TrimHandle::fadeIn)
+                lane.fadeInSeconds = juce::jlimit (0.0, maxFade, static_cast<double> (safePhase - trimStartPhase) * trackSeconds);
+            else
+                lane.fadeOutSeconds = juce::jlimit (0.0, maxFade, static_cast<double> (trimEndPhase - safePhase) * trackSeconds);
+
+            if (onLaneFadeChanged)
+                onLaneFadeChanged (draggingLaneTrack, draggingLaneIndex, lane.fadeInSeconds, lane.fadeOutSeconds, finished);
+        }
+        else
+        {
+            lane.orbitPhase = trimStartPhase;
+            if (onLaneTrimChanged)
+                onLaneTrimChanged (draggingLaneTrack, draggingLaneIndex, trimStartPhase, trimEndPhase, finished);
+        }
+
+        repaint();
+    }
+
+    MachineModel* machine = nullptr;
+    double rate = 1.0;
+    bool transportRunning = false;
+    int focusedTrackIndex = -1;
+    std::vector<TrackLayout> trackLayouts;
+    int draggingTrack = -1;
+    int draggingWarpIndex = -1;
+    int draggingLaneTrack = -1;
+    int draggingLaneIndex = -1;
+    bool draggingLaneHasMoved = false;
+    TrimHandle draggingTrim = TrimHandle::none;
+    bool panningOverviewView = false;
+    bool panningFocusedView = false;
+    bool shapeEditMode = false;
+    float overviewViewZoom = 1.0f;
+    juce::Point<float> overviewViewPan;
+    juce::Point<float> overviewPanStart;
+    juce::Point<float> overviewPanDragStart;
+    float focusedViewZoom = 1.0f;
+    juce::Point<float> focusedViewPan;
+    juce::Point<float> focusedPanStart;
+    juce::Point<float> focusedPanDragStart;
+    float trimStartPhase = 0.0f;
+    float trimEndPhase = 0.0f;
+    int selectedRenderedTrack = -1;
+    int selectedRenderedLane = -1;
+    double visualTransportStartMs = 0.0;
+    juce::AudioFormatManager formatManager;
+    std::unordered_map<std::string, std::unique_ptr<WaveformData>> waveforms;
+    std::unordered_map<int, StatePlayhead> statePlayheads;
+    PendingConnection pendingConnection;
+};
+
 class FsmNavigatorComponent final : public juce::Component
 {
 public:
@@ -2643,8 +4884,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto bounds = getLocalBounds().toFloat();
-        g.setColour (panelFill());
-        g.fillRoundedRectangle (bounds, 5.0f);
+        g.setColour (panelFill().withAlpha (0.88f));
+        g.fillRoundedRectangle (bounds, 4.0f);
 
         g.setColour (ink());
         g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
@@ -2660,10 +4901,10 @@ public:
             if (selected)
             {
                 const auto rowColour = graphColour (row.stateIndex, row.depth * 2);
-                g.setColour (inspectedFill().interpolatedWith (rowColour, 0.12f).withAlpha (0.95f));
+                g.setColour (inspectedFill().interpolatedWith (rowColour, 0.12f).withAlpha (0.96f));
                 g.fillRoundedRectangle (r.reduced (2.0f, 1.0f), 3.0f);
                 g.setColour (rowColour.withAlpha (0.62f));
-                g.drawRoundedRectangle (r.reduced (2.0f, 1.0f), 3.0f, 0.8f);
+                g.drawRoundedRectangle (r.reduced (2.0f, 1.0f), 3.0f, 0.75f);
             }
 
             const auto dotX = static_cast<float> (row.bounds.getX() + 10 + row.depth * 14);
@@ -2770,20 +5011,27 @@ public:
     std::function<void (int)> onSoloToggled;
     std::function<void (int)> onFreezeToggled;
     std::function<void (int, float)> onVolumeChanged;
+    std::function<void()> onDeleteSelectedLaneRequested;
+
+    TrackListComponent()
+    {
+        setWantsKeyboardFocus (true);
+    }
 
     void setState (State& stateToShow, int selectedLane)
     {
         state = &stateToShow;
         selectedIndex = selectedLane;
         clampScroll();
+        scrollSelectedIntoView();
         repaint();
     }
 
     void paint (juce::Graphics& g) override
     {
         auto bounds = getLocalBounds();
-        g.setColour (panelFill());
-        g.fillRoundedRectangle (bounds.toFloat(), 5.0f);
+        g.setColour (panelFill().withAlpha (0.88f));
+        g.fillRoundedRectangle (bounds.toFloat(), 4.0f);
 
         if (state == nullptr)
             return;
@@ -2792,28 +5040,29 @@ public:
             juce::Graphics::ScopedSaveState saveState (g);
             g.reduceClipRegion (getTrackViewportBounds());
 
+            const auto viewport = getTrackViewportBounds();
             auto list = getTrackListBounds();
             for (int i = 0; i < static_cast<int> (state->lanes.size()); ++i)
             {
-                auto row = list.removeFromTop (43).reduced (0, 4);
-                if (row.getBottom() < 0 || row.getY() > getHeight())
+                auto row = list.removeFromTop (rowHeight).reduced (0, rowVerticalInset);
+                if (row.getBottom() < viewport.getY() || row.getY() > viewport.getBottom())
                     continue;
 
                 const auto& lane = state->lanes[static_cast<size_t> (i)];
                 const auto selected = i == selectedIndex;
 
                 const auto laneColour = getTrackColour (i);
-                g.setColour (selected ? rowFill().interpolatedWith (laneColour, 0.14f)
-                                      : rowFill().interpolatedWith (laneColour, 0.025f).withAlpha (lane.enabled ? 0.88f : 0.42f));
-                g.fillRoundedRectangle (row.toFloat(), 4.0f);
+                g.setColour (selected ? rowFill().interpolatedWith (laneColour, 0.28f).withAlpha (1.0f)
+                                      : rowFill().interpolatedWith (laneColour, 0.09f).withAlpha (lane.enabled ? 0.94f : 0.44f));
+                g.fillRoundedRectangle (row.toFloat(), 3.0f);
                 if (selected)
                 {
                     g.setColour (laneColour.withAlpha (0.70f));
                     g.fillRoundedRectangle (row.withWidth (3).toFloat(), 2.0f);
                 }
 
-                g.setColour (selected ? laneColour.withAlpha (0.72f) : hairline().withAlpha (0.62f));
-                g.drawRoundedRectangle (row.toFloat(), 4.0f, selected ? 1.0f : 0.7f);
+                g.setColour (selected ? laneColour.withAlpha (1.0f) : laneColour.withAlpha (0.42f));
+                g.drawRoundedRectangle (row.toFloat(), 3.0f, selected ? 1.05f : 0.65f);
 
                 auto rowText = row.reduced (10, 0);
                 auto dotArea = rowText.removeFromLeft (12).withSizeKeepingCentre (8, 8).toFloat();
@@ -2843,13 +5092,15 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        grabKeyboardFocus();
+
         if (state == nullptr)
             return;
 
         auto list = getTrackListBounds();
         for (int i = 0; i < static_cast<int> (state->lanes.size()); ++i)
         {
-            auto row = list.removeFromTop (43).reduced (0, 4);
+            auto row = list.removeFromTop (rowHeight).reduced (0, rowVerticalInset);
             if (row.contains (event.getPosition()))
             {
                 auto controls = row.reduced (10, 0).removeFromRight (92);
@@ -2892,6 +5143,18 @@ public:
         }
     }
 
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (isLaneDeleteKey (key))
+        {
+            if (onDeleteSelectedLaneRequested)
+                onDeleteSelectedLaneRequested();
+            return true;
+        }
+
+        return false;
+    }
+
     void mouseDrag (const juce::MouseEvent& event) override
     {
         if (state == nullptr || draggingVolumeIndex < 0)
@@ -2907,7 +5170,7 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
-        scrollOffset -= wheel.deltaY * 92.0f;
+        scrollOffset -= wheel.deltaY * static_cast<float> (rowHeight * 2);
         clampScroll();
         repaint();
     }
@@ -2968,7 +5231,7 @@ private:
             return;
 
         auto list = getTrackListBounds();
-        auto row = list.removeFromTop (43 * index + 43).removeFromBottom (43).reduced (0, 4);
+        auto row = list.removeFromTop (rowHeight * index + rowHeight).removeFromBottom (rowHeight).reduced (0, rowVerticalInset);
         auto volumeArea = getVolumeBoundsForRow (row);
         const auto newVolume = juce::jlimit (0.0f, 1.0f, (x - static_cast<float> (volumeArea.getX())) / static_cast<float> (juce::jmax (1, volumeArea.getWidth() - 24)));
 
@@ -2985,23 +5248,50 @@ private:
 
     juce::Rectangle<int> getTrackViewportBounds() const
     {
-        return getLocalBounds().reduced (8, 8);
+        auto viewport = getLocalBounds().reduced (viewportPadding, viewportPadding);
+        if (needsScrollBar())
+            viewport.removeFromRight (scrollbarGutter);
+
+        return viewport;
     }
 
     int getContentHeight() const
     {
-        return state == nullptr ? 0 : static_cast<int> (state->lanes.size()) * 43;
+        return state == nullptr ? 0 : static_cast<int> (state->lanes.size()) * rowHeight;
     }
 
     int getViewportHeight() const
     {
-        return getLocalBounds().reduced (8, 8).getHeight();
+        return getLocalBounds().reduced (viewportPadding, viewportPadding).getHeight();
     }
 
     void clampScroll()
     {
         const auto maxScroll = juce::jmax (0.0f, static_cast<float> (getContentHeight() - getViewportHeight()));
         scrollOffset = juce::jlimit (0.0f, maxScroll, scrollOffset);
+    }
+
+    void scrollSelectedIntoView()
+    {
+        if (state == nullptr || state->lanes.empty())
+            return;
+
+        const auto index = juce::jlimit (0, static_cast<int> (state->lanes.size()) - 1, selectedIndex);
+        const auto rowTop = static_cast<float> (index * rowHeight);
+        const auto rowBottom = rowTop + static_cast<float> (rowHeight);
+        const auto viewportHeight = static_cast<float> (getViewportHeight());
+
+        if (rowTop < scrollOffset)
+            scrollOffset = rowTop;
+        else if (rowBottom > scrollOffset + viewportHeight)
+            scrollOffset = rowBottom - viewportHeight;
+
+        clampScroll();
+    }
+
+    bool needsScrollBar() const
+    {
+        return getContentHeight() > getViewportHeight();
     }
 
     void drawScrollBar (juce::Graphics& g) const
@@ -3011,7 +5301,7 @@ private:
         if (contentHeight <= viewportHeight || viewportHeight <= 0)
             return;
 
-        auto track = getLocalBounds().reduced (3, 10).removeFromRight (4).toFloat();
+        auto track = getLocalBounds().reduced (3, viewportPadding).removeFromRight (4).toFloat();
         const auto thumbHeight = juce::jmax (22.0f, track.getHeight() * static_cast<float> (viewportHeight) / static_cast<float> (contentHeight));
         const auto maxScroll = static_cast<float> (contentHeight - viewportHeight);
         const auto thumbY = track.getY() + (track.getHeight() - thumbHeight) * (scrollOffset / juce::jmax (1.0f, maxScroll));
@@ -3025,6 +5315,10 @@ private:
     int selectedIndex = 0;
     int draggingVolumeIndex = -1;
     float scrollOffset = 0.0f;
+    static constexpr int rowHeight = 32;
+    static constexpr int rowVerticalInset = 2;
+    static constexpr int viewportPadding = 8;
+    static constexpr int scrollbarGutter = 10;
 };
 
 class MixerComponent final : public juce::Component,
@@ -3040,9 +5334,11 @@ public:
     std::function<void (int, float)> onVolumeChanged;
     std::function<void (int, float)> onGainChanged;
     std::function<void (int, float)> onPanChanged;
+    std::function<void()> onDeleteSelectedLaneRequested;
 
     MixerComponent()
     {
+        setWantsKeyboardFocus (true);
         startTimerHz (36);
     }
 
@@ -3094,6 +5390,8 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
+        grabKeyboardFocus();
+
         if (state == nullptr)
             return;
 
@@ -3152,6 +5450,18 @@ public:
             repaint();
             return;
         }
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (isLaneDeleteKey (key))
+        {
+            if (onDeleteSelectedLaneRequested)
+                onDeleteSelectedLaneRequested();
+            return true;
+        }
+
+        return false;
     }
 
     void mouseDrag (const juce::MouseEvent& event) override
@@ -4391,7 +6701,7 @@ private:
 
     void chooseDestination()
     {
-        chooser = std::make_unique<juce::FileChooser> ("Export wf Audio", outputFile, "*.wav");
+        chooser = std::make_unique<juce::FileChooser> ("Export of Audio", outputFile, "*.wav");
         chooser->launchAsync (juce::FileBrowserComponent::saveMode
                                   | juce::FileBrowserComponent::canSelectFiles
                                   | juce::FileBrowserComponent::warnAboutOverwriting,
@@ -4476,7 +6786,7 @@ public:
         addAndMakeVisible (dismissButton);
         addAndMakeVisible (recentTitle);
 
-        title.setText ("wf::", juce::dontSendNotification);
+        title.setText ("of::", juce::dontSendNotification);
         title.setFont (juce::FontOptions (30.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, ink());
         title.setJustificationType (juce::Justification::centredLeft);
@@ -4619,8 +6929,10 @@ class MainComponent final : public juce::Component,
 public:
     MainComponent() : machine ("root", "", false), graph (machine), rules (machine), scriptEditor (codeDocument, &scTokeniser)
     {
+        setLookAndFeel (&ofLookAndFeel);
         setSize (1180, 760);
         audioDeviceManager.initialise (0, 2, nullptr, true);
+        audioDeviceManager.addAudioCallback (&renderedAudioPlayer);
 
         addAndMakeVisible (title);
         addAndMakeVisible (projectFileLabel);
@@ -4641,7 +6953,8 @@ public:
         addAndMakeVisible (stepButton);
         addAndMakeVisible (stopAllButton);
         addAndMakeVisible (rateSlider);
-        addAndMakeVisible (graph);
+        addChildComponent (graph);
+        addAndMakeVisible (orbitCanvas);
         addAndMakeVisible (graphFitButton);
         addAndMakeVisible (graphLayoutButton);
         addAndMakeVisible (arrangementViewButton);
@@ -4664,6 +6977,10 @@ public:
         addAndMakeVisible (stateMeterBeatsEditor);
         addAndMakeVisible (stateMeterSlashLabel);
         addAndMakeVisible (stateMeterUnitEditor);
+        addAndMakeVisible (stateDurationModeButton);
+        addAndMakeVisible (stateDurationBarsEditor);
+        addAndMakeVisible (stateDurationBeatsEditor);
+        addAndMakeVisible (stateDurationSecondsEditor);
         addAndMakeVisible (nestedTimingLabel);
         addAndMakeVisible (nestedModeBox);
         addAndMakeVisible (nestedDivisionLabel);
@@ -4674,6 +6991,9 @@ public:
         addAndMakeVisible (mixerModeButton);
         addAndMakeVisible (trackPaneTitle);
         addAndMakeVisible (trackNameEditor);
+        addAndMakeVisible (shapeEditButton);
+        addAndMakeVisible (resetShapeButton);
+        addAndMakeVisible (renderAllButton);
         addAndMakeVisible (freezeStatusLabel);
         addAndMakeVisible (refreezeLaneButton);
         addAndMakeVisible (refreezeStaleButton);
@@ -4697,7 +7017,7 @@ public:
         addAndMakeVisible (playButton);
         addChildComponent (welcomePanel);
 
-        title.setText ("wf::", juce::dontSendNotification);
+        title.setText ("of::", juce::dontSendNotification);
         title.setFont (juce::FontOptions (24.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, ink());
 
@@ -4745,12 +7065,31 @@ public:
         configureSmallNumberEditor (stateTempoEditor, 6, "0123456789.");
         configureSmallNumberEditor (stateMeterBeatsEditor, 2, "0123456789");
         configureSmallNumberEditor (stateMeterUnitEditor, 2, "0123456789");
+        configureSmallNumberEditor (stateDurationBarsEditor, 2, "0123456789");
+        configureSmallNumberEditor (stateDurationBeatsEditor, 3, "0123456789");
+        configureSmallNumberEditor (stateDurationSecondsEditor, 6, "0123456789.");
+        stateDurationModeButton.setButtonText ("Bars");
+        stateDurationModeButton.onClick = [this]
+        {
+            auto& inspected = currentInspectorMachine();
+            auto& state = inspected.state (inspected.selectedState);
+            state.durationUsesSeconds = ! state.durationUsesSeconds;
+            commitStateTimingEditors();
+            markMachineDirty();
+            refreshControls();
+        };
         stateTempoEditor.onReturnKey = [this] { commitStateTimingEditors(); };
         stateTempoEditor.onFocusLost = [this] { commitStateTimingEditors(); };
         stateMeterBeatsEditor.onReturnKey = [this] { commitStateTimingEditors(); };
         stateMeterBeatsEditor.onFocusLost = [this] { commitStateTimingEditors(); };
         stateMeterUnitEditor.onReturnKey = [this] { commitStateTimingEditors(); };
         stateMeterUnitEditor.onFocusLost = [this] { commitStateTimingEditors(); };
+        stateDurationBarsEditor.onReturnKey = [this] { commitStateTimingEditors(); };
+        stateDurationBarsEditor.onFocusLost = [this] { commitStateTimingEditors(); };
+        stateDurationBeatsEditor.onReturnKey = [this] { commitStateTimingEditors(); };
+        stateDurationBeatsEditor.onFocusLost = [this] { commitStateTimingEditors(); };
+        stateDurationSecondsEditor.onReturnKey = [this] { commitStateTimingEditors(); };
+        stateDurationSecondsEditor.onFocusLost = [this] { commitStateTimingEditors(); };
 
         nestedTimingLabel.setText ("Nested timing", juce::dontSendNotification);
         nestedTimingLabel.setFont (juce::FontOptions (12.5f, juce::Font::bold));
@@ -4844,7 +7183,9 @@ public:
         masterGainSlider.setTextValueSuffix ("x");
         masterGainSlider.onValueChange = [this]
         {
-            host.setMasterGain (static_cast<float> (masterGainSlider.getValue()));
+            const auto gain = static_cast<float> (masterGainSlider.getValue());
+            host.setMasterGain (gain);
+            renderedAudioPlayer.setMasterGain (gain);
         };
 
         rulesTracksDivider.onDragged = [this] (int delta)
@@ -4932,13 +7273,13 @@ public:
 
         if (connect (57142))
         {
-            addListener (this, "/wf/state");
-            addListener (this, "/wf/meter");
-            addListener (this, "/wf/pulse");
-            addListener (this, "/wf/scheduled");
-            addListener (this, "/wf/frozen");
-            addListener (this, "/wf/exported");
-            addListener (this, "/wf/exportProgress");
+            addListener (this, "/of/state");
+            addListener (this, "/of/meter");
+            addListener (this, "/of/pulse");
+            addListener (this, "/of/scheduled");
+            addListener (this, "/of/frozen");
+            addListener (this, "/of/exported");
+            addListener (this, "/of/exportProgress");
         }
         else
             appendLog ("Could not bind visual state OSC port 57142");
@@ -4997,11 +7338,16 @@ public:
             else
             {
                 fsmRunning = false;
+                ++playbackGeneration;
                 stopTransport();
+                renderedAudioPlayer.stopAll();
                 host.pauseMachine();
                 host.stopAll (machine);
                 graph.clearTimingPulse();
                 arrangementStrip.clearTimingPulse();
+                orbitCanvas.clearReversePlayheads();
+                orbitConnectionTransportStartMs = 0.0;
+                previousOrbitConnectionPhases.clear();
                 visualNextStateMs = 0.0;
                 scheduledTransitionTargetMs = 0.0;
                 scheduledVisualNextState = -1;
@@ -5017,12 +7363,17 @@ public:
         stopAllButton.onClick = [this]
         {
             fsmRunning = false;
+            ++playbackGeneration;
             stopTransport();
+            renderedAudioPlayer.stopAll();
             runButton.setButtonText ("Run");
             host.pauseMachine();
             host.stopAll (machine);
             graph.clearTimingPulse();
             arrangementStrip.clearTimingPulse();
+            orbitCanvas.clearReversePlayheads();
+            orbitConnectionTransportStartMs = 0.0;
+            previousOrbitConnectionPhases.clear();
             visualNextStateMs = 0.0;
             scheduledTransitionTargetMs = 0.0;
             scheduledVisualNextState = -1;
@@ -5033,11 +7384,13 @@ public:
         {
             fsmRunning = false;
             stopTransport();
+            renderedAudioPlayer.stopAll();
             host.pauseMachine();
             runButton.setButtonText ("Run");
             host.panic (machine);
             graph.clearTimingPulse();
             arrangementStrip.clearTimingPulse();
+            orbitCanvas.clearReversePlayheads();
             visualNextStateMs = 0.0;
             scheduledTransitionTargetMs = 0.0;
             scheduledVisualNextState = -1;
@@ -5115,18 +7468,27 @@ public:
 
         arrangementStrip.onLaneSelected = [this] (int stateIndex, int laneIndex)
         {
+            clearSelectedRenderedWaveform();
             machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
             machine.selectedLane = juce::jlimit (0, machine.getLaneCount (machine.selectedState) - 1, laneIndex);
             inspectedMachine = &machine;
             refreshControls();
         };
 
+        arrangementStrip.onDeleteSelectedLaneRequested = [this]
+        {
+            deleteSelectedLane();
+        };
+
         arrangementStrip.onStateLengthChanged = [this] (int stateIndex, int bars)
         {
             machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
-            machine.state (machine.selectedState).arrangementBars = juce::jlimit (1, 64, bars);
+            auto& state = machine.state (machine.selectedState);
+            state.durationUsesSeconds = false;
+            state.arrangementBars = juce::jlimit (1, 64, bars);
             inspectedMachine = &machine;
             transportIntervalMs = getTransportIntervalMs();
+            refreezeRenderedLanesInState (machine, machine.selectedState);
             markMachineDirty (UndoGroup::continuous);
             refreshControls();
         };
@@ -5159,6 +7521,11 @@ public:
         trackList.onVolumeChanged = [this] (int newIndex, float volume)
         {
             setInspectorLaneVolume (newIndex, volume);
+        };
+
+        trackList.onDeleteSelectedLaneRequested = [this]
+        {
+            deleteSelectedLane();
         };
 
         mixer.onTrackSelected = [this] (int newIndex)
@@ -5201,6 +7568,11 @@ public:
             setInspectorLanePan (newIndex, pan);
         };
 
+        mixer.onDeleteSelectedLaneRequested = [this]
+        {
+            deleteSelectedLane();
+        };
+
         codeDocument.addListener (this);
         scriptEditor.setLineNumbersShown (true);
         scriptEditor.setTabSize (4, true);
@@ -5241,6 +7613,10 @@ public:
         duplicateLaneButton.setButtonText ("Dup");
         refreezeLaneButton.setButtonText ("Refreeze");
         refreezeStaleButton.setButtonText ("All stale");
+        renderAllButton.setButtonText ("Render all");
+        shapeEditButton.setButtonText ("Edit shape");
+        shapeEditButton.setClickingTogglesState (true);
+        resetShapeButton.setButtonText ("Reset shape");
         moveLaneUpButton.setButtonText ("^");
         moveLaneDownButton.setButtonText ("v");
         addChildMachineButton.setButtonText ("+ FSM");
@@ -5256,10 +7632,7 @@ public:
 
         removeLaneButton.onClick = [this]
         {
-            host.stop (currentInspectorMachine().selectedLaneRef());
-            currentInspectorMachine().removeSelectedLane();
-            markMachineDirty();
-            refreshControls();
+            deleteSelectedLane();
         };
 
         duplicateLaneButton.onClick = [this]
@@ -5275,6 +7648,27 @@ public:
         refreezeStaleButton.onClick = [this]
         {
             refreezeStaleFrozenLanes();
+        };
+
+        renderAllButton.onClick = [this]
+        {
+            renderAllPlacedLanes();
+        };
+
+        shapeEditButton.onClick = [this]
+        {
+            orbitShapeEditMode = shapeEditButton.getToggleState();
+            orbitCanvas.setShapeEditMode (orbitShapeEditMode);
+            refreshControls();
+        };
+
+        resetShapeButton.onClick = [this]
+        {
+            auto& inspected = currentInspectorMachine();
+            inspected.state (inspected.selectedState).orbitWarp = {};
+            markProjectLayoutDirty();
+            orbitCanvas.repaint();
+            refreshControls();
         };
 
         moveLaneUpButton.onClick = [this]
@@ -5322,15 +7716,18 @@ public:
             auto& lane = inspected.selectedLaneRef();
             if (lane.playing)
             {
+                renderedAudioPlayer.stopLane (lane.id);
                 host.stop (lane);
             }
             else if (shouldPlayLane (state, lane))
             {
                 primeMeterForLane (lane);
-                host.play (lane, getSclangPathOverride());
+                host.playLive (lane, getSclangPathOverride());
+                statusLabel.setText ("Auditioning live code", juce::dontSendNotification);
             }
             else
             {
+                renderedAudioPlayer.stopLane (lane.id);
                 host.stop (lane);
             }
             refreshControls();
@@ -5422,6 +7819,7 @@ public:
             {
                 fsmRunning = false;
                 stopTransport();
+                renderedAudioPlayer.stopAll();
                 host.stopAll (machine);
                 runButton.setButtonText ("Run");
 
@@ -5440,6 +7838,7 @@ public:
                 {
                     fsmRunning = false;
                     stopTransport();
+                    renderedAudioPlayer.stopAll();
                     host.stopAll (machine);
                     runButton.setButtonText ("Run");
 
@@ -5454,6 +7853,189 @@ public:
         graph.onNodeLayoutChanged = [this]
         {
             markProjectLayoutDirty();
+        };
+
+        orbitCanvas.onTrackSelected = [this] (int stateIndex)
+        {
+            clearSelectedRenderedWaveform();
+            machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            machine.selectedLane = juce::jlimit (0, machine.getLaneCount (machine.selectedState) - 1, machine.selectedLane);
+            inspectedMachine = &machine;
+            refreshControls();
+        };
+
+        orbitCanvas.onLaneSelected = [this] (int stateIndex, int laneIndex)
+        {
+            clearSelectedRenderedWaveform();
+            machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            machine.selectedLane = juce::jlimit (0, machine.getLaneCount (machine.selectedState) - 1, laneIndex);
+            inspectedMachine = &machine;
+            refreshControls();
+        };
+
+        orbitCanvas.onTrackFocusRequested = [this] (int stateIndex)
+        {
+            clearSelectedRenderedWaveform();
+            orbitFocusedTrack = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            machine.selectedState = orbitFocusedTrack;
+            machine.selectedLane = juce::jlimit (0, machine.getLaneCount (machine.selectedState) - 1, machine.selectedLane);
+            inspectedMachine = &machine;
+            refreshControls();
+        };
+
+        orbitCanvas.onTrackFocusCleared = [this]
+        {
+            orbitFocusedTrack = -1;
+            refreshControls();
+        };
+
+        orbitCanvas.onScriptDropRequested = [this] (int stateIndex, float phase)
+        {
+            chooseSuperColliderFileForOrbit (stateIndex, phase);
+        };
+
+        orbitCanvas.onWarpChanged = [this] (int, int, float)
+        {
+            markMachineDirty (UndoGroup::continuous);
+        };
+
+        orbitCanvas.onLanePhaseChanged = [this] (int stateIndex, int laneIndex, float, bool finished)
+        {
+            const auto safeState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            const auto safeLane = juce::jlimit (0, machine.getLaneCount (safeState) - 1, laneIndex);
+            auto& lane = machine.state (safeState).lanes[static_cast<size_t> (safeLane)];
+            lane.preparedBridge = -1;
+
+            if (finished)
+            {
+                if (lane.frozen && ! lane.freezeInProgress)
+                {
+                    orbitCanvas.invalidateWaveforms();
+                    statusLabel.setText ("Moved " + lane.name, juce::dontSendNotification);
+                }
+                else
+                {
+                    statusLabel.setText ("Moved " + lane.name, juce::dontSendNotification);
+                }
+
+                markMachineDirty();
+            }
+            else
+            {
+                markMachineDirty (UndoGroup::continuous);
+            }
+
+            refreshControls();
+        };
+
+        orbitCanvas.onLaneTrimChanged = [this] (int stateIndex, int laneIndex, float startPhase, float endPhase, bool finished)
+        {
+            const auto safeState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            const auto safeLane = juce::jlimit (0, machine.getLaneCount (safeState) - 1, laneIndex);
+            auto& state = machine.state (safeState);
+            auto& lane = state.lanes[static_cast<size_t> (safeLane)];
+
+            const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+            const auto safeStart = juce::jlimit (0.0f, 0.997f, startPhase);
+            const auto safeEnd = juce::jlimit (safeStart + 0.0025f, 0.9999f, endPhase);
+            lane.orbitPhase = safeStart;
+            lane.durationMode = LaneDurationMode::fixedSeconds;
+            lane.durationValue = juce::jmax (0.05, static_cast<double> (safeEnd - safeStart) * trackSeconds);
+            const auto maxFade = lane.durationValue * 0.5;
+            lane.fadeInSeconds = juce::jlimit (0.0, maxFade, lane.fadeInSeconds);
+            lane.fadeOutSeconds = juce::jlimit (0.0, maxFade, lane.fadeOutSeconds);
+            lane.preparedBridge = -1;
+            selectedRenderedWaveformState = safeState;
+            selectedRenderedWaveformLane = safeLane;
+            orbitCanvas.setSelectedRenderedLane (safeState, safeLane);
+
+            if (finished)
+            {
+                if (lane.frozen && ! lane.freezeInProgress)
+                {
+                    orbitCanvas.invalidateWaveforms();
+                    if (lane.frozenDurationSeconds <= 0.0 || lane.durationValue > lane.frozenDurationSeconds + 0.02)
+                    {
+                        lane.freezeStale = true;
+                        beginFreezeLane (machine, safeState, safeLane);
+                        statusLabel.setText ("Extended and re-rendering " + lane.name, juce::dontSendNotification);
+                    }
+                    else
+                    {
+                        renderedAudioPlayer.stopLane (lane.id);
+                        lane.freezeStale = false;
+                        statusLabel.setText ("Trimmed " + lane.name, juce::dontSendNotification);
+                    }
+                }
+                else
+                {
+                    statusLabel.setText ("Trimmed " + lane.name, juce::dontSendNotification);
+                }
+
+                markMachineDirty();
+            }
+            else
+            {
+                statusLabel.setText ("Trimming " + lane.name, juce::dontSendNotification);
+                markMachineDirty (UndoGroup::continuous);
+            }
+
+            refreshControls();
+        };
+
+        orbitCanvas.onLaneFadeChanged = [this] (int stateIndex, int laneIndex, double fadeIn, double fadeOut, bool finished)
+        {
+            const auto safeState = juce::jlimit (0, machine.getStateCount() - 1, stateIndex);
+            const auto safeLane = juce::jlimit (0, machine.getLaneCount (safeState) - 1, laneIndex);
+            auto& state = machine.state (safeState);
+            auto& lane = state.lanes[static_cast<size_t> (safeLane)];
+            const auto duration = juce::jmax (0.01, laneRenderDurationSeconds (state, lane));
+            const auto maxFade = duration * 0.5;
+
+            lane.fadeInSeconds = juce::jlimit (0.0, maxFade, fadeIn);
+            lane.fadeOutSeconds = juce::jlimit (0.0, maxFade, fadeOut);
+            selectedRenderedWaveformState = safeState;
+            selectedRenderedWaveformLane = safeLane;
+            orbitCanvas.setSelectedRenderedLane (safeState, safeLane);
+            renderedAudioPlayer.stopLane (lane.id);
+
+            statusLabel.setText ("Fade " + lane.name
+                                  + "  in " + juce::String (lane.fadeInSeconds, 2)
+                                  + "s / out " + juce::String (lane.fadeOutSeconds, 2) + "s",
+                                  juce::dontSendNotification);
+            markMachineDirty (finished ? UndoGroup::structural : UndoGroup::continuous);
+            refreshControls();
+        };
+
+        orbitCanvas.onRenderedLaneSelected = [this] (int stateIndex, int laneIndex)
+        {
+            if (stateIndex < 0 || stateIndex >= machine.getStateCount())
+                return;
+
+            auto& state = machine.state (stateIndex);
+            if (laneIndex < 0 || laneIndex >= static_cast<int> (state.lanes.size()))
+                return;
+
+            selectedRenderedWaveformState = stateIndex;
+            selectedRenderedWaveformLane = laneIndex;
+            orbitCanvas.setSelectedRenderedLane (stateIndex, laneIndex);
+            statusLabel.setText ("Selected waveform: " + state.lanes[static_cast<size_t> (laneIndex)].name, juce::dontSendNotification);
+            orbitCanvas.repaint();
+        };
+
+        orbitCanvas.onDeleteRenderedLaneRequested = [this] (int stateIndex, int laneIndex)
+        {
+            deleteRenderedWaveformAt (stateIndex, laneIndex);
+        };
+
+        orbitCanvas.onDeleteSelectedLaneRequested = [this]
+        {
+            deleteSelectedLane();
+        };
+
+        orbitCanvas.onConnectionRequested = [this] (int sourceState, int sourceLane, float sourcePhase, int targetState)
+        {
+            promptOrbitConnectionAction (sourceState, sourceLane, sourcePhase, targetState);
         };
 
         rules.onRulesChanged = [this]
@@ -5480,6 +8062,8 @@ public:
     {
         exportWindow = nullptr;
         settingsWindow = nullptr;
+        audioDeviceManager.removeAudioCallback (&renderedAudioPlayer);
+        renderedAudioPlayer.stopAll();
         autosaveIfNeeded (true);
         saveAppState();
         stopTimer();
@@ -5490,12 +8074,14 @@ public:
         stopMachineRecursive (machine);
         host.onLogMessage = nullptr;
         host.onStatusChanged = nullptr;
+        setLookAndFeel (nullptr);
     }
 
     void newProject()
     {
         fsmRunning = false;
         stopTransport();
+        renderedAudioPlayer.stopAll();
         requestAudioProjectReset();
         prepareQueued = false;
         prepareQueuedStartAfter = false;
@@ -5640,7 +8226,7 @@ public:
     void showAbout()
     {
         juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon,
-                                                "wf::",
+                                                "of::",
                                                 "By matd.space");
     }
 
@@ -5667,6 +8253,7 @@ public:
 
         fsmRunning = false;
         stopTransport();
+        renderedAudioPlayer.stopAll();
         host.pauseMachine();
         host.stopAll (machine);
         requestAudioProjectReset();
@@ -5701,18 +8288,18 @@ public:
     {
         juce::ColourGradient bg (backgroundTop(), getLocalBounds().getTopLeft().toFloat(),
                                  backgroundBottom(), getLocalBounds().getBottomRight().toFloat(), false);
-        bg.addColour (0.72, juce::Colour (0xff1b2026));
+        bg.addColour (0.72, juce::Colour (0xff161b20));
         g.setGradientFill (bg);
         g.fillAll();
 
         auto strip = getLocalBounds().removeFromTop (2).toFloat();
-        juce::ColourGradient rainbow (graphColour (0).withAlpha (0.82f), strip.getTopLeft(),
-                                      graphColour (4).withAlpha (0.82f), strip.getTopRight(), false);
-        rainbow.addColour (0.18, graphColour (1).withAlpha (0.82f));
-        rainbow.addColour (0.36, graphColour (2).withAlpha (0.82f));
-        rainbow.addColour (0.54, graphColour (3).withAlpha (0.82f));
-        rainbow.addColour (0.72, graphColour (5).withAlpha (0.82f));
-        rainbow.addColour (0.88, graphColour (7).withAlpha (0.82f));
+        juce::ColourGradient rainbow (graphColour (0).withAlpha (0.98f), strip.getTopLeft(),
+                                      graphColour (4).withAlpha (0.98f), strip.getTopRight(), false);
+        rainbow.addColour (0.18, graphColour (1).withAlpha (0.98f));
+        rainbow.addColour (0.36, graphColour (2).withAlpha (0.98f));
+        rainbow.addColour (0.54, graphColour (3).withAlpha (0.98f));
+        rainbow.addColour (0.72, graphColour (5).withAlpha (0.98f));
+        rainbow.addColour (0.88, graphColour (7).withAlpha (0.98f));
         g.setGradientFill (rainbow);
         g.fillRect (strip);
 
@@ -5720,19 +8307,19 @@ public:
         auto header = chrome.removeFromTop (46).toFloat();
         auto tabs = chrome.removeFromTop (36).toFloat();
 
-        g.setColour (panelFill().withAlpha (0.50f));
-        g.fillRoundedRectangle (header.reduced (0.0f, 3.0f), 5.0f);
-        g.setColour (hairline().withAlpha (0.20f));
-        g.drawRoundedRectangle (header.reduced (0.0f, 3.0f), 5.0f, 1.0f);
+        g.setColour (panelFill().withAlpha (0.48f));
+        g.fillRoundedRectangle (header.reduced (0.0f, 3.0f), 4.0f);
+        g.setColour (hairline().withAlpha (0.22f));
+        g.drawRoundedRectangle (header.reduced (0.0f, 3.0f), 4.0f, 0.75f);
 
         g.setColour (panelFill().withAlpha (0.36f));
-        g.fillRoundedRectangle (tabs.reduced (0.0f, 2.0f), 5.0f);
-        g.setColour (hairline().withAlpha (0.16f));
-        g.drawRoundedRectangle (tabs.reduced (0.0f, 2.0f), 5.0f, 1.0f);
+        g.fillRoundedRectangle (tabs.reduced (0.0f, 2.0f), 4.0f);
+        g.setColour (hairline().withAlpha (0.18f));
+        g.drawRoundedRectangle (tabs.reduced (0.0f, 2.0f), 4.0f, 0.75f);
 
         auto divider = tabs.withY (tabs.getBottom() + 4.0f).withHeight (1.0f).reduced (8.0f, 0.0f);
         juce::ColourGradient line (juce::Colours::transparentBlack, divider.getTopLeft(),
-                                   hairline().withAlpha (0.42f), divider.getCentre(), false);
+                                   hairline().withAlpha (0.38f), divider.getCentre(), false);
         line.addColour (1.0, juce::Colours::transparentBlack);
         g.setGradientFill (line);
         g.fillRect (divider);
@@ -5788,31 +8375,35 @@ public:
         addButton (stopAllButton, compact ? 62 : 66);
         addButton (panicButton, compact ? 66 : 74);
         addGap (7);
+        addButton (renderAllButton, tiny ? 68 : (compact ? 82 : 94));
+        addGap (5);
         addButton (loadProjectButton, compact ? 52 : 62);
         addButton (saveProjectButton, compact ? 52 : 62);
         addGap (6);
-        addButton (undoButton, tiny ? 38 : (compact ? 60 : 70));
-        addButton (redoButton, tiny ? 38 : (compact ? 56 : 66));
-        addGap (6);
-        addButton (logButton, tiny ? 38 : (compact ? 48 : 54));
-        addButton (arrangementViewButton, tiny ? 54 : (compact ? 66 : 88));
-
-        if (buttonRow.getWidth() >= 102)
+        if (! tiny)
         {
-            addButton (graphFitButton, 38);
-            addButton (graphLayoutButton, 58);
+            addButton (undoButton, compact ? 54 : 64);
+            addButton (redoButton, compact ? 52 : 60);
+            addGap (6);
         }
         else
         {
-            hideButton (graphFitButton);
-            hideButton (graphLayoutButton);
+            hideButton (undoButton);
+            hideButton (redoButton);
         }
+        addButton (logButton, tiny ? 38 : (compact ? 48 : 54));
+        if (buttonRow.getWidth() >= (tiny ? 58 : 74))
+            addButton (arrangementViewButton, tiny ? 54 : (compact ? 66 : 88));
+        else
+            hideButton (arrangementViewButton);
+        hideButton (graphFitButton);
+        hideButton (graphLayoutButton);
 
         const auto horizontalDividerHeight = 8;
         constexpr int compactArrangementHeight = 108;
         const auto topWorkspaceHeight = 36;
-        const auto minGraphHeight = codeExpanded ? 112 : 230;
-        const auto minBottomHeight = codeExpanded ? 320 : 170;
+        const auto minGraphHeight = codeExpanded ? 112 : 300;
+        const auto minBottomHeight = codeExpanded ? 320 : 150;
         const auto maxBottomHeight = juce::jmax (minBottomHeight, area.getHeight() - topWorkspaceHeight - minGraphHeight - horizontalDividerHeight);
         if (codeExpanded)
         {
@@ -5822,7 +8413,7 @@ public:
         else
         {
             if (! bottomPaneUserSized)
-                bottomPaneHeight = juce::jlimit (240, 330, juce::roundToInt (static_cast<float> (area.getHeight()) * 0.30f));
+                bottomPaneHeight = juce::jlimit (190, 260, juce::roundToInt (static_cast<float> (area.getHeight()) * 0.24f));
             bottomPaneHeight = juce::jlimit (minBottomHeight, maxBottomHeight, bottomPaneHeight);
         }
 
@@ -5859,13 +8450,27 @@ public:
 
         auto inspectorArea = tracksPane.reduced (10, 8);
         const auto rightDividerHeight = 8;
-        const auto minStatePaneHeight = 232;
-        const auto minTrackPaneHeight = 220;
+        const auto minStatePaneHeight = 136;
+        const auto minTrackPaneHeight = 300;
         const auto maxStatePaneHeight = juce::jmax (minStatePaneHeight,
                                                     inspectorArea.getHeight() - minTrackPaneHeight - rightDividerHeight);
         if (! rightInspectorUserSized)
-            rightStatePaneHeight = juce::jlimit (260, 340, juce::roundToInt (static_cast<float> (inspectorArea.getHeight()) * 0.44f));
+            rightStatePaneHeight = juce::jlimit (170, 270, juce::roundToInt (static_cast<float> (inspectorArea.getHeight()) * 0.30f));
         rightStatePaneHeight = juce::jlimit (minStatePaneHeight, maxStatePaneHeight, rightStatePaneHeight);
+
+        if (inspectorMode == InspectorMode::tracks)
+        {
+            const auto& inspectedForLayout = currentInspectorMachine();
+            const auto laneCount = inspectedForLayout.getStateCount() > 0
+                ? static_cast<int> (inspectedForLayout.state (inspectedForLayout.selectedState).lanes.size())
+                : 0;
+            const auto trackControlsHeight = 18 + 34 + 34 + 30 + 42 + 18;
+            const auto desiredTrackPaneHeight = trackControlsHeight + laneCount * 32;
+            const auto laneAwareMaxStatePaneHeight = inspectorArea.getHeight() - desiredTrackPaneHeight - rightDividerHeight;
+
+            if (laneAwareMaxStatePaneHeight >= minStatePaneHeight)
+                rightStatePaneHeight = juce::jmin (rightStatePaneHeight, laneAwareMaxStatePaneHeight);
+        }
 
         auto statePane = inspectorArea.removeFromTop (rightStatePaneHeight);
         rightInspectorDivider.setBounds (inspectorArea.removeFromTop (rightDividerHeight).reduced (0, 1));
@@ -5885,6 +8490,11 @@ public:
         stateMeterBeatsEditor.setBounds (stateTimingRow.removeFromLeft (36).reduced (2, 4));
         stateMeterSlashLabel.setBounds (stateTimingRow.removeFromLeft (14).reduced (0, 4));
         stateMeterUnitEditor.setBounds (stateTimingRow.removeFromLeft (36).reduced (2, 4));
+        stateTimingRow.removeFromLeft (8);
+        stateDurationModeButton.setBounds (stateTimingRow.removeFromLeft (52).reduced (2, 4));
+        stateDurationBarsEditor.setBounds (stateTimingRow.removeFromLeft (34).reduced (2, 4));
+        stateDurationBeatsEditor.setBounds (stateTimingRow.removeFromLeft (34).reduced (2, 4));
+        stateDurationSecondsEditor.setBounds (stateTimingRow.removeFromLeft (58).reduced (2, 4));
         statePaneInner.removeFromTop (6);
         auto nestedHeaderRow = statePaneInner.removeFromTop (32);
         nestedSectionTitle.setBounds (nestedHeaderRow.removeFromLeft (104).reduced (2, 4));
@@ -5906,9 +8516,12 @@ public:
 
         const auto showTracks = inspectorMode == InspectorMode::tracks;
         trackNameEditor.setVisible (showTracks);
+        shapeEditButton.setVisible (showTracks);
+        resetShapeButton.setVisible (showTracks);
         freezeStatusLabel.setVisible (showTracks);
         refreezeLaneButton.setVisible (showTracks);
         refreezeStaleButton.setVisible (showTracks);
+        renderAllButton.setVisible (true);
         trackPaneTitle.setVisible (showTracks);
         moveLaneUpButton.setVisible (showTracks);
         moveLaneDownButton.setVisible (showTracks);
@@ -5928,6 +8541,9 @@ public:
             freezeStatusLabel.setBounds (freezeRow.reduced (2, 4));
             auto trackHeader = trackPaneInner.removeFromTop (42);
             trackPaneTitle.setBounds (trackHeader.removeFromLeft (58).reduced (2, 4));
+            resetShapeButton.setBounds (trackHeader.removeFromRight (78).reduced (2, 5));
+            shapeEditButton.setBounds (trackHeader.removeFromRight (78).reduced (2, 5));
+            trackHeader.removeFromRight (4);
             moveLaneUpButton.setBounds (trackHeader.removeFromRight (30).reduced (2, 5));
             moveLaneDownButton.setBounds (trackHeader.removeFromRight (30).reduced (2, 5));
             trackHeader.removeFromRight (6);
@@ -5940,6 +8556,8 @@ public:
         else
         {
             trackNameEditor.setBounds ({});
+            shapeEditButton.setBounds ({});
+            resetShapeButton.setBounds ({});
             freezeStatusLabel.setBounds ({});
             refreezeLaneButton.setBounds ({});
             refreezeStaleButton.setBounds ({});
@@ -5973,18 +8591,21 @@ public:
 
         if (arrangementViewMode == 1)
         {
-            graph.setBounds (graphArea);
+            orbitCanvas.setBounds (graphArea);
+            graph.setBounds ({});
             arrangementStrip.setBounds (graphArea.removeFromTop (compactArrangementHeight).reduced (5, 6));
             arrangementStrip.toFront (false);
         }
         else if (arrangementViewMode == 2)
         {
             graph.setBounds ({});
+            orbitCanvas.setBounds ({});
             arrangementStrip.setBounds (graphArea);
         }
         else
         {
-            graph.setBounds (graphArea);
+            graph.setBounds ({});
+            orbitCanvas.setBounds (graphArea);
         }
     }
 
@@ -5999,6 +8620,9 @@ public:
     {
         const auto mods = key.getModifiers();
         const auto keyCode = key.getKeyCode();
+
+        if (isLaneDeleteKey (key) && ! mods.isCommandDown() && ! mods.isCtrlDown() && ! mods.isAltDown())
+            return deleteSelectedLane();
 
         if (mods.isCommandDown() && (keyCode == 'z' || keyCode == 'Z'))
         {
@@ -6185,8 +8809,8 @@ private:
         if (pendingCheckId.isEmpty())
             return;
 
-        const auto okMarker = "WF_CHECK_OK " + pendingCheckId;
-        const auto errorMarker = "WF_CHECK_ERROR " + pendingCheckId;
+        const auto okMarker = "OF_CHECK_OK " + pendingCheckId;
+        const auto errorMarker = "OF_CHECK_ERROR " + pendingCheckId;
 
         if (message.contains (okMarker))
         {
@@ -6217,7 +8841,7 @@ private:
 
     void handleSchedulerStateMessage (const juce::String& message)
     {
-        const auto marker = "WF_STATE ";
+        const auto marker = "OF_STATE ";
         const auto markerIndex = message.indexOf (marker);
         if (markerIndex < 0)
             return;
@@ -6233,43 +8857,43 @@ private:
     void oscMessageReceived (const juce::OSCMessage& message) override
     {
         const auto address = message.getAddressPattern().toString();
-        if (address == "/wf/meter")
+        if (address == "/of/meter")
         {
             handleMeterMessage (message);
             return;
         }
 
-        if (address == "/wf/pulse")
+        if (address == "/of/pulse")
         {
             handlePulseMessage (message);
             return;
         }
 
-        if (address == "/wf/scheduled")
+        if (address == "/of/scheduled")
         {
             handleScheduledTransitionMessage (message);
             return;
         }
 
-        if (address == "/wf/frozen")
+        if (address == "/of/frozen")
         {
             handleFrozenMessage (message);
             return;
         }
 
-        if (address == "/wf/exported")
+        if (address == "/of/exported")
         {
             handleExportedMessage (message);
             return;
         }
 
-        if (address == "/wf/exportProgress")
+        if (address == "/of/exportProgress")
         {
             handleExportProgressMessage (message);
             return;
         }
 
-        if (address != "/wf/state")
+        if (address != "/of/state")
             return;
 
         if (message.size() < 2 || ! message[0].isString())
@@ -6346,8 +8970,11 @@ private:
         lane->freezeStale = false;
         lane->freezeInProgress = false;
         lane->frozenAudioPath = message[1].getString();
+        if (lane->frozenDurationSeconds <= 0.0)
+            lane->frozenDurationSeconds = laneRenderDurationSeconds (machine.state (machine.selectedState), *lane) / juce::jmax (0.05, rateSlider.getValue());
         lane->preparedBridge = -1;
         statusLabel.setText ("Freeze ready", juce::dontSendNotification);
+        orbitCanvas.invalidateWaveforms();
         markMachineDirty (UndoGroup::continuous);
         refreshProjectMediaStatus();
         refreshControls();
@@ -6416,6 +9043,7 @@ private:
         }
 
         tickVisualScheduler (now);
+        tickOrbitConnections (now);
     }
 
     float getOscFloat (const juce::OSCArgument& argument) const
@@ -6456,7 +9084,7 @@ private:
     juce::File appStateFile() const
     {
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                       .getChildFile ("wf");
+                       .getChildFile ("of");
         dir.createDirectory();
         return dir.getChildFile ("app-state.json");
     }
@@ -6464,7 +9092,7 @@ private:
     juce::File autosaveFile() const
     {
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                       .getChildFile ("wf")
+                       .getChildFile ("of")
                        .getChildFile ("autosave");
         dir.createDirectory();
         return dir.getChildFile ("Last Session.markovfsm");
@@ -6548,6 +9176,7 @@ private:
         const auto masterGain = juce::jlimit (0.0, 5.0, static_cast<double> (parsed.getProperty ("masterGain", masterGainSlider.getValue())));
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
+        renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
     }
 
     bool restoreLastProject()
@@ -6755,6 +9384,13 @@ private:
         object->setProperty ("frozen", lane.frozen);
         object->setProperty ("freezeStale", lane.freezeStale);
         object->setProperty ("frozenAudioPath", lane.frozenAudioPath);
+        object->setProperty ("frozenDurationSeconds", lane.frozenDurationSeconds);
+        object->setProperty ("sourceScriptPath", lane.sourceScriptPath);
+        object->setProperty ("orbitPhase", lane.orbitPhase);
+        object->setProperty ("durationMode", laneDurationModeToString (lane.durationMode));
+        object->setProperty ("durationValue", lane.durationValue);
+        object->setProperty ("fadeInSeconds", lane.fadeInSeconds);
+        object->setProperty ("fadeOutSeconds", lane.fadeOutSeconds);
         return object;
     }
 
@@ -6766,6 +9402,13 @@ private:
         object->setProperty ("beatsPerBar", state.beatsPerBar);
         object->setProperty ("beatUnit", state.beatUnit);
         object->setProperty ("arrangementBars", state.arrangementBars);
+        object->setProperty ("arrangementBeats", state.arrangementBeats);
+        object->setProperty ("durationUsesSeconds", state.durationUsesSeconds);
+        object->setProperty ("durationSeconds", state.durationSeconds);
+        juce::Array<juce::var> orbitWarp;
+        for (const auto warp : state.orbitWarp)
+            orbitWarp.add (warp);
+        object->setProperty ("orbitWarp", orbitWarp);
 
         juce::Array<juce::var> lanes;
         for (const auto& lane : state.lanes)
@@ -6818,13 +9461,27 @@ private:
         }
         object->setProperty ("rules", projectRules);
 
+        juce::Array<juce::var> projectConnections;
+        for (const auto& connection : model.orbitConnections)
+        {
+            auto connectionObject = new juce::DynamicObject();
+            connectionObject->setProperty ("sourceState", connection.sourceState);
+            connectionObject->setProperty ("sourceLane", connection.sourceLane);
+            connectionObject->setProperty ("sourcePhase", connection.sourcePhase);
+            connectionObject->setProperty ("targetState", connection.targetState);
+            connectionObject->setProperty ("action", orbitConnectionActionToString (connection.action));
+            connectionObject->setProperty ("fabricScript", connection.fabricScript);
+            projectConnections.add (connectionObject);
+        }
+        object->setProperty ("orbitConnections", projectConnections);
+
         return object;
     }
 
     juce::var makeProjectVar() const
     {
         auto object = new juce::DynamicObject();
-        object->setProperty ("format", "wf:: Project");
+        object->setProperty ("format", "of:: Project");
         object->setProperty ("version", 1);
         object->setProperty ("rate", rateSlider.getValue());
         object->setProperty ("masterGain", masterGainSlider.getValue());
@@ -6941,6 +9598,7 @@ private:
         const auto masterGain = juce::jlimit (0.0, 5.0, static_cast<double> (parsed.getProperty ("masterGain", masterGainSlider.getValue())));
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
+        renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
         machineStack.clear();
         activeMachine = &machine;
         inspectedMachine = &machine;
@@ -7016,7 +9674,7 @@ private:
 
         lane.id = value.getProperty ("id", model.makeLaneId (stateIndex, laneIndex)).toString();
         lane.name = value.getProperty ("name", "Lane " + juce::String (laneIndex + 1)).toString();
-        lane.script = value.getProperty ("script", WfDemo::defaultScriptFor (stateIndex, laneIndex)).toString();
+        lane.script = value.getProperty ("script", OfDemo::defaultScriptFor (stateIndex, laneIndex)).toString();
         lane.volume = juce::jlimit (0.0f, 1.0f, static_cast<float> (static_cast<double> (value.getProperty ("volume", 1.0))));
         lane.gain = juce::jlimit (0.0f, 2.0f, static_cast<float> (static_cast<double> (value.getProperty ("gain", 1.0))));
         lane.pan = juce::jlimit (-1.0f, 1.0f, static_cast<float> (static_cast<double> (value.getProperty ("pan", 0.0))));
@@ -7026,6 +9684,13 @@ private:
         lane.frozen = static_cast<bool> (value.getProperty ("frozen", false));
         lane.freezeStale = static_cast<bool> (value.getProperty ("freezeStale", false));
         lane.frozenAudioPath = resolveProjectMediaPathForLoad (value.getProperty ("frozenAudioPath", {}).toString());
+        lane.frozenDurationSeconds = juce::jlimit (0.0, 3600.0, static_cast<double> (value.getProperty ("frozenDurationSeconds", 0.0)));
+        lane.sourceScriptPath = resolveProjectMediaPathForLoad (value.getProperty ("sourceScriptPath", {}).toString());
+        lane.orbitPhase = juce::jlimit (0.0f, 0.9999f, static_cast<float> (static_cast<double> (value.getProperty ("orbitPhase", 0.0))));
+        lane.durationMode = laneDurationModeFromString (value.getProperty ("durationMode", "natural").toString());
+        lane.durationValue = juce::jlimit (0.01, 3600.0, static_cast<double> (value.getProperty ("durationValue", 1.0)));
+        lane.fadeInSeconds = juce::jlimit (0.0, 3600.0, static_cast<double> (value.getProperty ("fadeInSeconds", 0.0)));
+        lane.fadeOutSeconds = juce::jlimit (0.0, 3600.0, static_cast<double> (value.getProperty ("fadeOutSeconds", 0.0)));
         if (lane.frozen && lane.frozenAudioPath.isNotEmpty() && ! juce::File (lane.frozenAudioPath).existsAsFile())
             lane.freezeStale = true;
         lane.freezeInProgress = false;
@@ -7050,6 +9715,7 @@ private:
         model.childMachines.clear();
         model.childMachines.resize (static_cast<size_t> (stateCount));
         model.rules.clear();
+        model.orbitConnections.clear();
         model.timingMode = timingModeFromProjectString (value.getProperty ("timingMode", "follow").toString());
         model.parentDivision = juce::jlimit (1, 32, static_cast<int> (value.getProperty ("parentDivision", 1)));
         model.parentTickCounter = 0;
@@ -7065,7 +9731,18 @@ private:
             state.tempoBpm = juce::jlimit (20.0, 320.0, static_cast<double> (stateVar.getProperty ("tempoBpm", 120.0)));
             state.beatsPerBar = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatsPerBar", 4)));
             state.beatUnit = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatUnit", 4)));
-            state.arrangementBars = juce::jlimit (1, 64, static_cast<int> (stateVar.getProperty ("arrangementBars", 1)));
+            state.arrangementBars = juce::jlimit (0, 64, static_cast<int> (stateVar.getProperty ("arrangementBars", 1)));
+            state.arrangementBeats = juce::jlimit (0, 256, static_cast<int> (stateVar.getProperty ("arrangementBeats", 0)));
+            state.durationUsesSeconds = static_cast<bool> (stateVar.getProperty ("durationUsesSeconds", false));
+            state.durationSeconds = juce::jlimit (0.25, 3600.0, static_cast<double> (stateVar.getProperty ("durationSeconds", state.secondsPerSection())));
+            state.orbitWarp = {};
+            if (auto* warpArray = stateVar.getProperty ("orbitWarp", {}).getArray())
+            {
+                const auto warpCount = juce::jmin (8, warpArray->size());
+                for (int warpIndex = 0; warpIndex < warpCount; ++warpIndex)
+                    state.orbitWarp[static_cast<size_t> (warpIndex)] = juce::jlimit (-0.32f, 0.42f,
+                        static_cast<float> (static_cast<double> (warpArray->getReference (warpIndex))));
+            }
             state.lanes.clear();
 
             if (auto* lanesArray = stateVar.getProperty ("lanes", {}).getArray())
@@ -7079,7 +9756,7 @@ private:
             }
 
             if (state.lanes.empty())
-                state.lanes.push_back ({ model.makeLaneId (i, 0), "Lane 1", WfDemo::defaultScriptFor (i, 0) });
+                state.lanes.push_back ({ model.makeLaneId (i, 0), "Lane 1", OfDemo::defaultScriptFor (i, 0) });
 
             const auto childVar = stateVar.getProperty ("child", {});
             if (childVar.isObject())
@@ -7123,6 +9800,24 @@ private:
         if (model.rules.empty())
             model.regenerateRingRules();
 
+        if (auto* connectionsArray = value.getProperty ("orbitConnections", {}).getArray())
+        {
+            for (const auto& connectionVar : *connectionsArray)
+            {
+                const auto sourceState = juce::jlimit (0, stateCount - 1, static_cast<int> (connectionVar.getProperty ("sourceState", 0)));
+                const auto sourceLane = juce::jlimit (0, model.getLaneCount (sourceState) - 1, static_cast<int> (connectionVar.getProperty ("sourceLane", 0)));
+                const auto targetState = juce::jlimit (0, stateCount - 1, static_cast<int> (connectionVar.getProperty ("targetState", 0)));
+                const auto sourcePhase = juce::jlimit (0.0f, 0.9999f,
+                                                       static_cast<float> (static_cast<double> (connectionVar.getProperty ("sourcePhase", 0.0))));
+                model.orbitConnections.push_back ({ sourceState,
+                                                    sourceLane,
+                                                    sourcePhase,
+                                                    targetState,
+                                                    orbitConnectionActionFromString (connectionVar.getProperty ("action", "start").toString()),
+                                                    connectionVar.getProperty ("fabricScript", {}).toString() });
+            }
+        }
+
         model.selectedState = juce::jlimit (0, stateCount - 1, static_cast<int> (value.getProperty ("selectedState", 0)));
         model.selectedLane = juce::jlimit (0, model.getLaneCount (model.selectedState) - 1, static_cast<int> (value.getProperty ("selectedLane", 0)));
         model.entryState = juce::jlimit (0, stateCount - 1, static_cast<int> (value.getProperty ("entryState", 0)));
@@ -7162,6 +9857,7 @@ private:
         const auto masterGain = juce::jlimit (0.0, 5.0, static_cast<double> (parsed.getProperty ("masterGain", masterGainSlider.getValue())));
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
+        renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
         machineStack.clear();
         activeMachine = &machine;
         inspectedMachine = &machine;
@@ -7223,9 +9919,9 @@ private:
     {
         const auto start = currentProjectFile.existsAsFile()
             ? currentProjectFile
-            : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("wf.markovfsm");
+            : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("of.markovfsm");
 
-        projectChooser = std::make_unique<juce::FileChooser> ("Save wf Project", start, "*.markovfsm;*.json");
+        projectChooser = std::make_unique<juce::FileChooser> ("Save of Project", start, "*.markovfsm;*.json");
         auto safeThis = juce::Component::SafePointer<MainComponent> (this);
         projectChooser->launchAsync (juce::FileBrowserComponent::saveMode
                                          | juce::FileBrowserComponent::canSelectFiles
@@ -7252,7 +9948,7 @@ private:
             ? currentProjectFile.getParentDirectory()
             : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
 
-        projectChooser = std::make_unique<juce::FileChooser> ("Load wf Project", start, "*.markovfsm;*.json");
+        projectChooser = std::make_unique<juce::FileChooser> ("Load of Project", start, "*.markovfsm;*.json");
         auto safeThis = juce::Component::SafePointer<MainComponent> (this);
         projectChooser->launchAsync (juce::FileBrowserComponent::openMode
                                          | juce::FileBrowserComponent::canSelectFiles,
@@ -7276,7 +9972,7 @@ private:
     {
         auto base = currentProjectFile.existsAsFile()
             ? currentProjectFile.getSiblingFile (currentProjectFile.getFileNameWithoutExtension() + " Export.wav")
-            : juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("wf Export.wav");
+            : juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("of Export.wav");
 
         return base;
     }
@@ -7312,7 +10008,7 @@ private:
 
     void chooseAudioExportFile()
     {
-        projectChooser = std::make_unique<juce::FileChooser> ("Export wf Audio", defaultAudioExportFile(), "*.wav");
+        projectChooser = std::make_unique<juce::FileChooser> ("Export of Audio", defaultAudioExportFile(), "*.wav");
         auto safeThis = juce::Component::SafePointer<MainComponent> (this);
         projectChooser->launchAsync (juce::FileBrowserComponent::saveMode
                                          | juce::FileBrowserComponent::canSelectFiles
@@ -7343,6 +10039,7 @@ private:
 
         fsmRunning = false;
         stopTransport();
+        renderedAudioPlayer.stopAll();
         host.pauseMachine();
         host.stopAll (machine);
         runButton.setButtonText ("Run");
@@ -7753,10 +10450,13 @@ private:
         const auto laneCount = static_cast<int> (s.lanes.size());
         auto activeText = (&inspected == activeMachine) ? "active" : "inspecting";
         const auto nestedText = inspected.hasChildMachine (inspected.selectedState) ? "nested FSM" : "no nested FSM";
+        const auto durationText = s.durationUsesSeconds
+            ? juce::String (s.durationSeconds, 1) + " sec"
+            : juce::String (s.arrangementBars) + "b " + juce::String (s.arrangementBeats) + "bt";
         return s.name + "  |  " + juce::String (laneCount) + (laneCount == 1 ? " track" : " tracks")
              + "  |  " + juce::String (s.tempoBpm, 1) + " BPM"
              + "  |  " + juce::String (s.beatsPerBar) + "/" + juce::String (s.beatUnit)
-             + "  |  " + juce::String (s.arrangementBars) + (s.arrangementBars == 1 ? " bar" : " bars")
+             + "  |  " + durationText
              + "  |  " + activeText + "  |  " + nestedText;
     }
 
@@ -7769,7 +10469,7 @@ private:
     {
         auto safeId = lane.id.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_");
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                       .getChildFile ("wf")
+                       .getChildFile ("of")
                        .getChildFile ("freezes");
         dir.createDirectory();
         return dir.getChildFile (safeId + ".wav");
@@ -7789,6 +10489,79 @@ private:
         }
 
         return nullptr;
+    }
+
+    Lane* findLaneByIdInState (State& state, const juce::String& laneId)
+    {
+        for (auto& lane : state.lanes)
+            if (lane.id == laneId)
+                return &lane;
+
+        return nullptr;
+    }
+
+    void promptOrbitConnectionAction (int sourceState, int sourceLane, float sourcePhase, int targetState)
+    {
+        if (sourceState < 0 || sourceState >= machine.getStateCount()
+            || targetState < 0 || targetState >= machine.getStateCount()
+            || sourceLane < 0 || sourceLane >= machine.getLaneCount (sourceState))
+            return;
+
+        juce::PopupMenu menu;
+        menu.addItem (1, "Start target");
+        menu.addItem (2, "Pause target");
+        menu.addItem (3, "Restart target");
+        menu.addItem (4, "Reverse target");
+        menu.addSeparator();
+        menu.addItem (5, "Programmable Fabric script");
+
+        menu.showMenuAsync (juce::PopupMenu::Options(),
+                            [safeThis = juce::Component::SafePointer<MainComponent> (this),
+                             sourceState, sourceLane, sourcePhase, targetState] (int result)
+        {
+            if (safeThis == nullptr || result == 0)
+                return;
+
+            auto action = OrbitConnectionAction::start;
+            if (result == 2)
+                action = OrbitConnectionAction::pause;
+            else if (result == 3)
+                action = OrbitConnectionAction::restart;
+            else if (result == 4)
+                action = OrbitConnectionAction::reverse;
+            else if (result == 5)
+                action = OrbitConnectionAction::programmable;
+
+            safeThis->createOrbitConnection (sourceState, sourceLane, sourcePhase, targetState, action);
+        });
+    }
+
+    void createOrbitConnection (int sourceState,
+                                int sourceLane,
+                                float sourcePhase,
+                                int targetState,
+                                OrbitConnectionAction action)
+    {
+        OrbitConnection connection;
+        connection.sourceState = juce::jlimit (0, machine.getStateCount() - 1, sourceState);
+        connection.sourceLane = juce::jlimit (0, machine.getLaneCount (connection.sourceState) - 1, sourceLane);
+        connection.sourcePhase = juce::jlimit (0.0f, 0.9999f, sourcePhase);
+        connection.targetState = juce::jlimit (0, machine.getStateCount() - 1, targetState);
+        connection.action = action;
+        if (action == OrbitConnectionAction::programmable)
+            connection.fabricScript = "// Fabric script hook\n"
+                                      "target.start();";
+
+        machine.orbitConnections.push_back (std::move (connection));
+        previousOrbitConnectionPhases.assign (machine.orbitConnections.size(), 0.0f);
+        statusLabel.setText ("Connection: "
+                             + machine.state (sourceState).name + " -> "
+                             + machine.state (targetState).name + " / "
+                             + orbitConnectionActionLabel (action),
+                             juce::dontSendNotification);
+        markMachineDirty();
+        orbitCanvas.repaint();
+        refreshControls();
     }
 
     void commitNestedDivisionEditor()
@@ -7820,11 +10593,49 @@ private:
         auto bpm = stateTempoEditor.getText().getDoubleValue();
         auto beats = stateMeterBeatsEditor.getText().getIntValue();
         auto unit = stateMeterUnitEditor.getText().getIntValue();
+        auto durationBars = stateDurationBarsEditor.getText().getIntValue();
+        auto durationBeats = stateDurationBeatsEditor.getText().getIntValue();
+        auto durationSeconds = stateDurationSecondsEditor.getText().getDoubleValue();
 
-        state.tempoBpm = juce::jlimit (20.0, 320.0, bpm <= 0.0 ? state.tempoBpm : bpm);
-        state.beatsPerBar = juce::jlimit (1, 32, beats <= 0 ? state.beatsPerBar : beats);
-        state.beatUnit = juce::jlimit (1, 32, unit <= 0 ? state.beatUnit : unit);
+        const auto oldTempo = state.tempoBpm;
+        const auto oldBeats = state.beatsPerBar;
+        const auto oldUnit = state.beatUnit;
+        const auto oldArrangementBars = state.arrangementBars;
+        const auto oldArrangementBeats = state.arrangementBeats;
+        const auto oldDurationUsesSeconds = state.durationUsesSeconds;
+        const auto oldDurationSeconds = state.durationSeconds;
+        const auto newTempo = juce::jlimit (20.0, 320.0, bpm <= 0.0 ? state.tempoBpm : bpm);
+        const auto newBeats = juce::jlimit (1, 32, beats <= 0 ? state.beatsPerBar : beats);
+        const auto newUnit = juce::jlimit (1, 32, unit <= 0 ? state.beatUnit : unit);
+
+        state.tempoBpm = newTempo;
+        state.beatsPerBar = newBeats;
+        state.beatUnit = newUnit;
+        state.arrangementBars = juce::jlimit (0, 64, durationBars < 0 ? state.arrangementBars : durationBars);
+        state.arrangementBeats = juce::jlimit (0, 256, durationBeats < 0 ? state.arrangementBeats : durationBeats);
+        state.durationSeconds = juce::jlimit (0.25, 3600.0, durationSeconds <= 0.0 ? state.durationSeconds : durationSeconds);
+        if (! state.durationUsesSeconds && state.arrangementBars == 0 && state.arrangementBeats == 0)
+            state.arrangementBars = 1;
+
+        const auto timingChanged = std::abs (oldTempo - state.tempoBpm) > 0.001
+                                || oldBeats != state.beatsPerBar
+                                || oldUnit != state.beatUnit
+                                || oldArrangementBars != state.arrangementBars
+                                || oldArrangementBeats != state.arrangementBeats
+                                || oldDurationUsesSeconds != state.durationUsesSeconds
+                                || std::abs (oldDurationSeconds - state.durationSeconds) > 0.001;
         transportIntervalMs = getTransportIntervalMs();
+
+        if (timingChanged)
+        {
+            const auto refreezeCount = refreezeRenderedLanesInState (inspected, inspected.selectedState);
+            markMachineDirty();
+            if (refreezeCount > 0)
+                statusLabel.setText ("Re-rendering " + juce::String (refreezeCount) + " lane" + (refreezeCount == 1 ? "" : "s"), juce::dontSendNotification);
+            else
+                statusLabel.setText ("Timing updated", juce::dontSendNotification);
+        }
+
         refreshControls();
     }
 
@@ -7854,6 +10665,7 @@ private:
 
         fsmRunning = false;
         stopTransport();
+        renderedAudioPlayer.stopAll();
         host.stopAll (machine);
         runButton.setButtonText ("Run");
 
@@ -7936,11 +10748,24 @@ private:
     {
         runButton.setButtonText ("Pause");
         stopTransport();
+        machine.entryState = 0;
+        machine.selectedState = 0;
+        visualNextStateMs = 0.0;
+        scheduledTransitionTargetMs = 0.0;
+        scheduledVisualNextState = -1;
+        graph.clearTimingPulse();
+        arrangementStrip.clearTimingPulse();
+        orbitCanvas.resetTransportStart();
+        orbitCanvas.clearReversePlayheads();
+        orbitConnectionTransportStartMs = juce::Time::getMillisecondCounterHiRes();
+        previousOrbitConnectionPhases.assign (machine.orbitConnections.size(), 0.0f);
         host.configureMachine (machine);
         applyAllMixToHost();
-        primeMetersForActiveState (machine);
-        setVisualStateImmediate (machine.selectedState, false);
-        host.runMachine (machine.selectedState, rateSlider.getValue());
+        primeMetersForAllPlayableLanes (machine);
+        setVisualStateImmediate (0, false);
+        ++playbackGeneration;
+        renderedLaneLoopVersions.clear();
+        scheduleAllTracksFromBarZero (playbackGeneration);
         refreshControls();
     }
 
@@ -8390,7 +11215,10 @@ private:
         for (auto& state : model.states)
         {
             for (auto& lane : state.lanes)
+            {
+                renderedAudioPlayer.stopLane (lane.id);
                 host.stop (lane);
+            }
 
             if (auto* child = model.childMachine (state.index))
                 stopMachineRecursive (*child);
@@ -8435,7 +11263,11 @@ private:
         for (auto& state : model.states)
         {
             for (const auto& lane : state.lanes)
-                host.setLaneEffectiveMix (lane, effectiveLaneVolume (state, lane));
+            {
+                const auto volume = effectiveLaneVolume (state, lane);
+                host.setLaneEffectiveMix (lane, volume);
+                renderedAudioPlayer.setLaneMix (lane.id, volume, lane.pan);
+            }
 
             if (auto* child = model.childMachine (state.index))
                 applyMixToHostRecursive (*child);
@@ -8470,10 +11302,568 @@ private:
         }
     }
 
+    void primeMetersForAllPlayableLanes (MachineModel& model)
+    {
+        for (auto& state : model.states)
+        {
+            const auto hasPlacedAudio = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+            {
+                return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+            });
+
+            for (const auto& lane : state.lanes)
+                if (shouldRunPlacedLaneOnOrbit (state, lane, hasPlacedAudio))
+                    primeMeterForLane (lane);
+
+            if (auto* child = model.childMachine (state.index))
+                primeMetersForAllPlayableLanes (*child);
+        }
+    }
+
+    void tickOrbitConnections (double now)
+    {
+        if (! fsmRunning || orbitConnectionTransportStartMs <= 0.0 || machine.orbitConnections.empty())
+            return;
+
+        if (previousOrbitConnectionPhases.size() != machine.orbitConnections.size())
+        {
+            previousOrbitConnectionPhases.resize (machine.orbitConnections.size(), 0.0f);
+            for (size_t i = 0; i < machine.orbitConnections.size(); ++i)
+                previousOrbitConnectionPhases[i] = currentPhaseForConnection (machine.orbitConnections[i], now);
+            return;
+        }
+
+        for (size_t i = 0; i < machine.orbitConnections.size(); ++i)
+        {
+            const auto& connection = machine.orbitConnections[i];
+            if (connection.sourceState < 0 || connection.sourceState >= machine.getStateCount()
+                || connection.targetState < 0 || connection.targetState >= machine.getStateCount())
+                continue;
+
+            const auto previous = previousOrbitConnectionPhases[i];
+            const auto current = currentPhaseForConnection (connection, now);
+            previousOrbitConnectionPhases[i] = current;
+
+            const auto root = juce::jlimit (0.0f, 0.9999f, connection.sourcePhase);
+            const auto crossed = current >= previous
+                ? (root > previous && root <= current)
+                : (root > previous || root <= current);
+
+            if (crossed)
+                fireOrbitConnection (connection);
+        }
+    }
+
+    float currentPhaseForConnection (const OrbitConnection& connection, double now) const
+    {
+        if (connection.sourceState < 0 || connection.sourceState >= machine.getStateCount())
+            return 0.0f;
+
+        const auto rate = juce::jmax (0.05, rateSlider.getValue());
+        const auto duration = juce::jmax (0.1, machine.state (connection.sourceState).secondsPerSection() / rate);
+        const auto elapsed = juce::jmax (0.0, (now - orbitConnectionTransportStartMs) * 0.001);
+        return static_cast<float> (std::fmod (elapsed, duration) / duration);
+    }
+
+    void fireOrbitConnection (const OrbitConnection& connection)
+    {
+        if (connection.targetState < 0 || connection.targetState >= machine.getStateCount())
+            return;
+
+        switch (connection.action)
+        {
+            case OrbitConnectionAction::start:
+                if (orbitCanvas.isPlayheadPaused (connection.targetState))
+                {
+                    const auto phase = orbitCanvas.playheadPhaseForState (connection.targetState);
+                    orbitCanvas.setRestartPlayhead (connection.targetState);
+                    startOrbitConnectionTargetFromPhase (connection.targetState, phase);
+                }
+                else
+                {
+                    orbitCanvas.setReversePlayhead (connection.targetState, false);
+                    startOrbitConnectionTarget (connection.targetState);
+                }
+                break;
+
+            case OrbitConnectionAction::pause:
+                orbitCanvas.setPausedPlayhead (connection.targetState);
+                pauseOrbitConnectionTarget (connection.targetState);
+                break;
+
+            case OrbitConnectionAction::restart:
+                stopOrbitConnectionTarget (connection.targetState);
+                orbitCanvas.setRestartPlayhead (connection.targetState);
+                startOrbitConnectionTarget (connection.targetState);
+                break;
+
+            case OrbitConnectionAction::reverse:
+            {
+                const auto phase = orbitCanvas.playheadPhaseForState (connection.targetState);
+                const auto currentlyReversed = orbitCanvas.isPlayheadReversed (connection.targetState);
+                stopRenderedOrbitConnectionTarget (connection.targetState);
+                startRenderedOrbitConnectionTargetFromPhase (connection.targetState, phase, ! currentlyReversed);
+                if (currentlyReversed)
+                    orbitCanvas.setForwardPlayheadFromPhase (connection.targetState, phase);
+                else
+                    orbitCanvas.setReversePlayheadFromPhase (connection.targetState, phase);
+                break;
+            }
+
+            case OrbitConnectionAction::programmable:
+                appendLog ("Fabric connection fired for " + machine.state (connection.targetState).name
+                           + ": " + connection.fabricScript);
+                break;
+        }
+
+        statusLabel.setText ("Connection fired: " + orbitConnectionActionLabel (connection.action)
+                             + " " + machine.state (connection.targetState).name,
+                             juce::dontSendNotification);
+    }
+
+    void startOrbitConnectionTarget (int stateIndex, bool reverse = false)
+    {
+        auto& state = machine.state (stateIndex);
+        const auto hasPlacedAudio = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+        {
+            return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+        });
+
+        for (auto& lane : state.lanes)
+        {
+            if (! shouldRunPlacedLaneOnOrbit (state, lane, hasPlacedAudio))
+                continue;
+
+            const auto rate = juce::jmax (0.05, rateSlider.getValue());
+            const auto trackMs = state.secondsPerSection() * 1000.0 / rate;
+            const auto delaySeconds = juce::jlimit (0.0, trackMs, trackMs * static_cast<double> (lane.orbitPhase)) / 1000.0;
+            const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
+            const auto laneId = lane.id;
+            const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+            if (isRenderedLane)
+            {
+                scheduleRenderedLaneOrbitLoop (stateIndex, lane.id, delaySeconds, playbackGeneration, reverse);
+            }
+            else if (delayMs <= 1)
+            {
+                host.play (lane, getSclangPathOverride());
+                lane.playing = true;
+            }
+            else
+            {
+                const auto generation = playbackGeneration;
+                juce::Timer::callAfterDelay (delayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this), laneId, generation]
+                {
+                    if (safeThis == nullptr || ! safeThis->fsmRunning || safeThis->playbackGeneration != generation)
+                        return;
+
+                    if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
+                    {
+                        safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
+                        laneToPlay->playing = true;
+                    }
+                });
+            }
+        }
+    }
+
+    void startOrbitConnectionTargetFromPhase (int stateIndex, float phase)
+    {
+        auto& state = machine.state (stateIndex);
+        const auto safePhase = juce::jlimit (0.0f, 0.9999f, phase);
+        const auto rate = juce::jmax (0.05, rateSlider.getValue());
+        const auto trackSeconds = state.secondsPerSection() / rate;
+        const auto hasPlacedAudio = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+        {
+            return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+        });
+
+        for (auto& lane : state.lanes)
+        {
+            if (! shouldRunPlacedLaneOnOrbit (state, lane, hasPlacedAudio))
+                continue;
+
+            const auto laneStart = juce::jlimit (0.0f, 0.9999f, lane.orbitPhase);
+            const auto span = lanePhaseSpanForState (state, lane);
+            const auto laneEnd = juce::jlimit (laneStart + 0.002f, 0.9999f, laneStart + span);
+            const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+            auto delaySeconds = 0.0;
+            auto sourceOffsetSeconds = 0.0;
+
+            if (safePhase < laneStart)
+            {
+                delaySeconds = static_cast<double> (laneStart - safePhase) * trackSeconds;
+            }
+            else if (safePhase <= laneEnd)
+            {
+                sourceOffsetSeconds = static_cast<double> (safePhase - laneStart) * trackSeconds;
+            }
+            else
+            {
+                delaySeconds = static_cast<double> ((1.0f - safePhase) + laneStart) * trackSeconds;
+            }
+
+            if (isRenderedLane)
+            {
+                scheduleRenderedLaneOrbitLoop (stateIndex, lane.id, delaySeconds, playbackGeneration, false, sourceOffsetSeconds);
+                continue;
+            }
+
+            const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
+            if (sourceOffsetSeconds > 0.0)
+                continue;
+
+            if (delayMs <= 1)
+            {
+                host.play (lane, getSclangPathOverride());
+                lane.playing = true;
+            }
+            else
+            {
+                const auto generation = playbackGeneration;
+                const auto laneId = lane.id;
+                juce::Timer::callAfterDelay (delayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this), laneId, generation]
+                {
+                    if (safeThis == nullptr || ! safeThis->fsmRunning || safeThis->playbackGeneration != generation)
+                        return;
+
+                    if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
+                    {
+                        safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
+                        laneToPlay->playing = true;
+                    }
+                });
+            }
+        }
+    }
+
+    void startRenderedOrbitConnectionTargetFromPhase (int stateIndex, float phase, bool reverse)
+    {
+        auto& state = machine.state (stateIndex);
+        const auto safePhase = juce::jlimit (0.0f, 0.9999f, phase);
+        const auto rate = juce::jmax (0.05, rateSlider.getValue());
+        const auto trackSeconds = state.secondsPerSection() / rate;
+
+        for (auto& lane : state.lanes)
+        {
+            if (! shouldPlayLane (state, lane))
+                continue;
+            if (! lane.frozen || lane.freezeStale || lane.frozenAudioPath.isEmpty())
+                continue;
+
+            const auto laneStart = juce::jlimit (0.0f, 0.9999f, lane.orbitPhase);
+            const auto span = lanePhaseSpanForState (state, lane);
+            const auto laneEnd = juce::jlimit (laneStart + 0.002f, 0.9999f, laneStart + span);
+            auto delaySeconds = 0.0;
+            auto sourceOffsetSeconds = 0.0;
+
+            if (! reverse)
+            {
+                if (safePhase < laneStart)
+                {
+                    delaySeconds = static_cast<double> (laneStart - safePhase) * trackSeconds;
+                }
+                else if (safePhase <= laneEnd)
+                {
+                    sourceOffsetSeconds = static_cast<double> (safePhase - laneStart) * trackSeconds;
+                }
+                else
+                {
+                    delaySeconds = static_cast<double> ((1.0f - safePhase) + laneStart) * trackSeconds;
+                }
+            }
+            else if (safePhase >= laneStart && safePhase <= laneEnd)
+            {
+                sourceOffsetSeconds = static_cast<double> (safePhase - laneStart) * trackSeconds;
+            }
+            else
+            {
+                delaySeconds = static_cast<double> (safePhase > laneEnd
+                    ? safePhase - laneEnd
+                    : safePhase + (1.0f - laneEnd)) * trackSeconds;
+                sourceOffsetSeconds = static_cast<double> (laneEnd - laneStart) * trackSeconds;
+            }
+
+            scheduleRenderedLaneOrbitLoop (stateIndex, lane.id, delaySeconds, playbackGeneration, reverse, sourceOffsetSeconds);
+        }
+    }
+
+    void stopRenderedOrbitConnectionTarget (int stateIndex)
+    {
+        auto& state = machine.state (stateIndex);
+        for (auto& lane : state.lanes)
+        {
+            if (! lane.frozen || lane.frozenAudioPath.isEmpty())
+                continue;
+
+            cancelRenderedLaneOrbitLoop (stateIndex, lane.id);
+            renderedAudioPlayer.stopLane (lane.id);
+            lane.playing = false;
+        }
+    }
+
+    void pauseOrbitConnectionTarget (int stateIndex)
+    {
+        auto& state = machine.state (stateIndex);
+        for (auto& lane : state.lanes)
+        {
+            cancelRenderedLaneOrbitLoop (stateIndex, lane.id);
+            renderedAudioPlayer.stopLane (lane.id);
+            host.stop (lane);
+            lane.playing = false;
+        }
+    }
+
+    void stopOrbitConnectionTarget (int stateIndex)
+    {
+        pauseOrbitConnectionTarget (stateIndex);
+    }
+
+    void scheduleAllTracksFromBarZero (int generation)
+    {
+        host.stopAll (machine);
+        renderedAudioPlayer.start();
+
+        const auto rate = juce::jmax (0.05, rateSlider.getValue());
+        for (auto& state : machine.states)
+        {
+            const auto trackMs = state.secondsPerSection() * 1000.0 / rate;
+            const auto hasPlacedAudio = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+            {
+                return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+            });
+
+            for (auto& lane : state.lanes)
+            {
+                if (! shouldRunPlacedLaneOnOrbit (state, lane, hasPlacedAudio))
+                    continue;
+
+                const auto delaySeconds = juce::jlimit (0.0, trackMs, trackMs * static_cast<double> (lane.orbitPhase)) / 1000.0;
+                const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
+                const auto laneId = lane.id;
+                const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+
+                if (isRenderedLane)
+                {
+                    scheduleRenderedLaneOrbitLoop (state.index, lane.id, delaySeconds, generation);
+                    continue;
+                }
+
+                if (delayMs <= 1)
+                {
+                    host.play (lane, getSclangPathOverride());
+                    lane.playing = true;
+                }
+                else
+                {
+                    juce::Timer::callAfterDelay (delayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this), laneId, generation]
+                    {
+                        if (safeThis == nullptr || ! safeThis->fsmRunning || safeThis->playbackGeneration != generation)
+                            return;
+
+                        if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
+                            safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
+                    });
+                }
+            }
+        }
+    }
+
+    void scheduleRenderedLaneOrbitLoop (int stateIndex,
+                                        const juce::String& laneId,
+                                        double delaySeconds,
+                                        int generation,
+                                        bool reverse = false,
+                                        double sourceOffsetSeconds = 0.0,
+                                        int loopVersion = -1)
+    {
+        if (! fsmRunning || playbackGeneration != generation)
+            return;
+
+        if (stateIndex < 0 || stateIndex >= machine.getStateCount())
+            return;
+
+        const auto loopKey = renderedLaneLoopKey (stateIndex, laneId);
+        if (loopVersion < 0)
+            loopVersion = ++renderedLaneLoopVersions[loopKey];
+        else if (renderedLaneLoopVersions[loopKey] != loopVersion)
+            return;
+
+        auto& state = machine.state (stateIndex);
+        auto* lane = findLaneByIdInState (state, laneId);
+        if (lane == nullptr || ! shouldRunLaneOnOrbit (state, *lane, true))
+            return;
+
+        const auto rate = juce::jmax (0.05, rateSlider.getValue());
+        const auto trackSeconds = state.secondsPerSection() / rate;
+        const auto maxDuration = laneRenderDurationSeconds (state, *lane) / rate;
+
+        if (renderedAudioPlayer.scheduleLane (*lane,
+                                              juce::jmax (0.0, delaySeconds),
+                                              effectiveLaneVolume (state, *lane),
+                                              maxDuration,
+                                              reverse,
+                                              sourceOffsetSeconds))
+        {
+            lane->playing = true;
+            appendLog ("JUCE scheduled rendered lane: " + lane->id + " @ "
+                       + machine.state (stateIndex).name + " -> " + lane->frozenAudioPath);
+        }
+        else
+        {
+            appendLog ("Could not load rendered audio: " + lane->frozenAudioPath);
+            return;
+        }
+
+        const auto nextDelaySeconds = juce::jmax (0.01, delaySeconds + trackSeconds - juce::jmax (0.0, sourceOffsetSeconds));
+        const auto nextDelayMs = juce::jlimit (1, 120000, juce::roundToInt (nextDelaySeconds * 1000.0));
+        juce::Timer::callAfterDelay (nextDelayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this),
+                                                   stateIndex,
+                                                   laneId,
+                                                   generation,
+                                                   reverse,
+                                                   loopVersion]
+        {
+            if (safeThis == nullptr || ! safeThis->fsmRunning || safeThis->playbackGeneration != generation)
+                return;
+
+            safeThis->scheduleRenderedLaneOrbitLoop (stateIndex, laneId, 0.0, generation, reverse, 0.0, loopVersion);
+        });
+    }
+
+    std::string renderedLaneLoopKey (int stateIndex, const juce::String& laneId) const
+    {
+        return std::to_string (stateIndex) + ":" + laneId.toStdString();
+    }
+
+    void cancelRenderedLaneOrbitLoop (int stateIndex, const juce::String& laneId)
+    {
+        ++renderedLaneLoopVersions[renderedLaneLoopKey (stateIndex, laneId)];
+    }
+
+    bool shouldRunLaneOnOrbit (const State& state, const Lane& lane, bool trackHasPlacedAudio) const
+    {
+        if (! shouldPlayLane (state, lane))
+            return false;
+
+        const auto isPlacedAudio = lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
+        if (trackHasPlacedAudio && ! isPlacedAudio)
+            return false;
+
+        return isPlacedAudio && lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+    }
+
+    bool shouldRunPlacedLaneOnOrbit (const State& state, const Lane& lane, bool trackHasPlacedAudio) const
+    {
+        if (! shouldPlayLane (state, lane))
+            return false;
+
+        const auto hasRenderedAudio = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+        const auto hasLiveSource = lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
+        const auto isPlacedAudio = hasRenderedAudio || hasLiveSource || lane.frozenAudioPath.isNotEmpty();
+        if (trackHasPlacedAudio && ! isPlacedAudio)
+            return false;
+
+        return hasRenderedAudio || hasLiveSource;
+    }
+
     void selectInspectorLane (int newIndex)
     {
+        clearSelectedRenderedWaveform();
         currentInspectorMachine().selectedLane = newIndex;
         refreshControls();
+    }
+
+    bool deleteSelectedLane()
+    {
+        if (selectedRenderedWaveformState >= 0 && selectedRenderedWaveformLane >= 0)
+        {
+            const auto stateIndex = selectedRenderedWaveformState;
+            const auto laneIndex = selectedRenderedWaveformLane;
+            return deleteRenderedWaveformAt (stateIndex, laneIndex);
+        }
+
+        auto& inspected = currentInspectorMachine();
+        return deleteLaneAt (inspected, inspected.selectedState, inspected.selectedLane);
+    }
+
+    void clearSelectedRenderedWaveform()
+    {
+        selectedRenderedWaveformState = -1;
+        selectedRenderedWaveformLane = -1;
+        orbitCanvas.clearSelectedRenderedLane();
+    }
+
+    bool deleteRenderedWaveformAt (int stateIndex, int laneIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= machine.getStateCount())
+            return false;
+
+        auto& state = machine.state (stateIndex);
+        if (laneIndex < 0 || laneIndex >= static_cast<int> (state.lanes.size()))
+            return false;
+
+        auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+        if (lane.sourceScriptPath.isEmpty() && lane.frozenAudioPath.isEmpty() && ! lane.frozen)
+            return false;
+
+        renderedAudioPlayer.stopLane (lane.id);
+        host.stop (lane);
+        lane.playing = false;
+        lane.frozen = false;
+        lane.freezeStale = false;
+        lane.freezeInProgress = false;
+        lane.frozenAudioPath.clear();
+        lane.frozenDurationSeconds = 0.0;
+        lane.sourceScriptPath.clear();
+        lane.preparedBridge = -1;
+        laneMeters.erase (lane.id.toStdString());
+
+        clearSelectedRenderedWaveform();
+        statusLabel.setText ("Removed waveform from " + lane.name, juce::dontSendNotification);
+        orbitCanvas.invalidateWaveforms();
+        markMachineDirty();
+        applyAllMixToHost();
+        refreshControls();
+        return true;
+    }
+
+    bool deleteLaneAt (MachineModel& model, int stateIndex, int laneIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= model.getStateCount())
+            return false;
+
+        auto& state = model.state (stateIndex);
+        if (state.lanes.size() <= 1)
+        {
+            statusLabel.setText ("Keep at least one lane", juce::dontSendNotification);
+            return false;
+        }
+
+        laneIndex = juce::jlimit (0, static_cast<int> (state.lanes.size()) - 1, laneIndex);
+        auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+        const auto laneName = lane.name;
+        const auto meterKey = lane.id.toStdString();
+
+        renderedAudioPlayer.stopLane (lane.id);
+        host.stop (lane);
+        laneMeters.erase (meterKey);
+        state.lanes.erase (state.lanes.begin() + laneIndex);
+        model.selectedState = juce::jlimit (0, model.getStateCount() - 1, stateIndex);
+        model.selectedLane = juce::jlimit (0, static_cast<int> (state.lanes.size()) - 1, laneIndex);
+        if (&model == &machine && selectedRenderedWaveformState == stateIndex)
+        {
+            if (selectedRenderedWaveformLane == laneIndex)
+                clearSelectedRenderedWaveform();
+            else if (selectedRenderedWaveformLane > laneIndex)
+                --selectedRenderedWaveformLane;
+        }
+        statusLabel.setText ("Deleted " + laneName, juce::dontSendNotification);
+        orbitCanvas.invalidateWaveforms();
+        markMachineDirty();
+        applyAllMixToHost();
+        refreshControls();
+        return true;
     }
 
     void toggleInspectorLaneEnabled (int newIndex)
@@ -8483,7 +11873,10 @@ private:
         auto& lane = inspected.selectedLaneRef();
         lane.enabled = ! lane.enabled;
         if (! lane.enabled)
+        {
+            renderedAudioPlayer.stopLane (lane.id);
             host.stop (lane);
+        }
         markMachineDirty (UndoGroup::continuous);
         applyAllMixToHost();
         refreshControls();
@@ -8560,12 +11953,56 @@ private:
         lane.frozenAudioPath = freezeFileForLane (lane).getFullPathName();
         lane.preparedBridge = -1;
 
-        const auto duration = state.secondsPerSection() / juce::jmax (0.05, rateSlider.getValue());
+        const auto duration = laneRenderDurationSeconds (state, lane) / juce::jmax (0.05, rateSlider.getValue());
+        lane.frozenDurationSeconds = duration;
         if (host.freezeLane (lane, getSclangPathOverride(), duration, juce::File (lane.frozenAudioPath)))
             return true;
 
         lane.freezeInProgress = false;
         return false;
+    }
+
+    double laneRenderDurationSeconds (const State& state, const Lane& lane) const
+    {
+        const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+        const auto phase = juce::jlimit (0.0, 0.9999, static_cast<double> (lane.orbitPhase));
+        const auto remainingSeconds = juce::jmax (0.05, trackSeconds * (1.0 - phase));
+        const auto beatSeconds = 60.0 / juce::jlimit (20.0, 320.0, state.tempoBpm);
+        const auto totalBeats = state.durationUsesSeconds ? trackSeconds / beatSeconds : state.clockBeatsPerSection();
+        const auto currentBeat = phase * totalBeats;
+        const auto barBeats = juce::jmax (1.0, static_cast<double> (state.beatsPerBar) * (4.0 / static_cast<double> (juce::jlimit (1, 32, state.beatUnit))));
+
+        auto requested = remainingSeconds;
+        switch (lane.durationMode)
+        {
+            case LaneDurationMode::endOfBeat:
+                requested = (std::ceil (currentBeat + 0.0001) - currentBeat) * beatSeconds;
+                break;
+
+            case LaneDurationMode::endOfBar:
+                requested = (std::ceil ((currentBeat + 0.0001) / barBeats) * barBeats - currentBeat) * beatSeconds;
+                break;
+
+            case LaneDurationMode::fixedBars:
+                requested = juce::jmax (0.01, lane.durationValue) * state.secondsPerBar();
+                break;
+
+            case LaneDurationMode::fixedSeconds:
+                requested = juce::jmax (0.01, lane.durationValue);
+                break;
+
+            case LaneDurationMode::natural:
+                requested = remainingSeconds;
+                break;
+        }
+
+        return juce::jlimit (0.05, remainingSeconds, requested);
+    }
+
+    float lanePhaseSpanForState (const State& state, const Lane& lane) const
+    {
+        const auto trackSeconds = juce::jmax (0.25, state.secondsPerSection());
+        return static_cast<float> (juce::jlimit (0.002, 1.0, laneRenderDurationSeconds (state, lane) / trackSeconds));
     }
 
     int refreezeStaleFrozenLanesInMachine (MachineModel& model)
@@ -8584,6 +12021,32 @@ private:
             if (auto* child = model.childMachine (stateIndex))
                 count += refreezeStaleFrozenLanesInMachine (*child);
         }
+
+        return count;
+    }
+
+    int refreezeRenderedLanesInState (MachineModel& model, int stateIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= model.getStateCount())
+            return 0;
+
+        auto& state = model.state (stateIndex);
+        auto count = 0;
+
+        for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+        {
+            auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+            if (! lane.freezeInProgress && lane.frozen && lane.frozenAudioPath.isNotEmpty())
+            {
+                lane.freezeStale = true;
+                lane.preparedBridge = -1;
+                if (beginFreezeLane (model, stateIndex, laneIndex))
+                    ++count;
+            }
+        }
+
+        if (count > 0)
+            orbitCanvas.invalidateWaveforms();
 
         return count;
     }
@@ -8616,6 +12079,47 @@ private:
         else
         {
             statusLabel.setText ("No stale freezes", juce::dontSendNotification);
+        }
+
+        refreshControls();
+    }
+
+    int renderAllPlacedLanesInMachine (MachineModel& model)
+    {
+        auto count = 0;
+        for (int stateIndex = 0; stateIndex < model.getStateCount(); ++stateIndex)
+        {
+            auto& state = model.state (stateIndex);
+            for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+            {
+                auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                const auto hasSource = lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
+                if (hasSource && ! lane.freezeInProgress && beginFreezeLane (model, stateIndex, laneIndex))
+                    ++count;
+            }
+
+            if (auto* child = model.childMachine (stateIndex))
+                count += renderAllPlacedLanesInMachine (*child);
+        }
+
+        if (count > 0)
+            orbitCanvas.invalidateWaveforms();
+
+        return count;
+    }
+
+    void renderAllPlacedLanes()
+    {
+        const auto count = renderAllPlacedLanesInMachine (machine);
+        if (count > 0)
+        {
+            statusLabel.setText ("Rendering " + juce::String (count) + " lane" + (count == 1 ? "" : "s"), juce::dontSendNotification);
+            markMachineDirty();
+            refreshProjectMediaStatus();
+        }
+        else
+        {
+            statusLabel.setText ("No lanes to render", juce::dontSendNotification);
         }
 
         refreshControls();
@@ -8723,6 +12227,114 @@ private:
         refreshControls();
     }
 
+    void chooseSuperColliderFileForOrbit (int stateIndex, float phase)
+    {
+        const auto start = currentProjectFile.existsAsFile()
+            ? currentProjectFile.getParentDirectory()
+            : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+        projectChooser = std::make_unique<juce::FileChooser> ("Place SuperCollider File", start, "*.scd;*.txt");
+        auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        projectChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                         | juce::FileBrowserComponent::canSelectFiles,
+                                     [safeThis, stateIndex, phase] (const juce::FileChooser& chooser)
+                                     {
+                                         if (safeThis == nullptr)
+                                             return;
+
+                                         const auto file = chooser.getResult();
+                                         if (file == juce::File())
+                                             return;
+
+                                         safeThis->promptSuperColliderLaneDuration (stateIndex, phase, file);
+                                     });
+    }
+
+    void promptSuperColliderLaneDuration (int stateIndex, float phase, const juce::File& file)
+    {
+        laneDurationPrompt = std::make_unique<juce::AlertWindow> ("Render duration",
+                                                                  "Choose how long this SuperCollider file should play on the track.",
+                                                                  juce::AlertWindow::NoIcon);
+        laneDurationPrompt->addTextEditor ("amount", "1", "Bars or seconds");
+        laneDurationPrompt->addButton ("Beat", 1);
+        laneDurationPrompt->addButton ("Bar", 2);
+        laneDurationPrompt->addButton ("x bars", 3);
+        laneDurationPrompt->addButton ("x seconds", 4);
+        laneDurationPrompt->addButton ("Natural", 5);
+        laneDurationPrompt->addButton ("Cancel", 0);
+
+        auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        laneDurationPrompt->enterModalState (true, juce::ModalCallbackFunction::create (
+            [safeThis, stateIndex, phase, file] (int result)
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                auto amount = 1.0;
+                if (safeThis->laneDurationPrompt != nullptr)
+                    amount = safeThis->laneDurationPrompt->getTextEditorContents ("amount").getDoubleValue();
+
+                auto mode = LaneDurationMode::natural;
+                if (result == 1) mode = LaneDurationMode::endOfBeat;
+                else if (result == 2) mode = LaneDurationMode::endOfBar;
+                else if (result == 3) mode = LaneDurationMode::fixedBars;
+                else if (result == 4) mode = LaneDurationMode::fixedSeconds;
+                else if (result != 5)
+                {
+                    safeThis->laneDurationPrompt = nullptr;
+                    return;
+                }
+
+                safeThis->laneDurationPrompt = nullptr;
+                safeThis->placeSuperColliderFileOnOrbit (stateIndex, phase, file, mode, juce::jmax (0.01, amount));
+            }), false);
+    }
+
+    void placeSuperColliderFileOnOrbit (int stateIndex, float phase, const juce::File& file, LaneDurationMode durationMode, double durationValue)
+    {
+        if (stateIndex < 0 || stateIndex >= machine.getStateCount() || ! file.existsAsFile())
+        {
+            statusLabel.setText ("SC file not found", juce::dontSendNotification);
+            return;
+        }
+
+        auto script = file.loadFileAsString();
+        if (script.trim().isEmpty())
+        {
+            statusLabel.setText ("SC file was empty", juce::dontSendNotification);
+            return;
+        }
+
+        auto& state = machine.state (stateIndex);
+        Lane lane;
+        lane.id = makeUniqueLaneId (machine, stateIndex);
+        lane.name = file.getFileNameWithoutExtension();
+        lane.script = std::move (script);
+        lane.sourceScriptPath = file.getFullPathName();
+        lane.orbitPhase = juce::jlimit (0.0f, 0.9999f, phase);
+        lane.durationMode = durationMode;
+        lane.durationValue = durationValue;
+        lane.volume = 1.0f;
+        lane.enabled = true;
+        lane.frozen = false;
+        lane.freezeStale = false;
+        lane.freezeInProgress = false;
+        lane.preparedBridge = -1;
+
+        state.lanes.push_back (std::move (lane));
+        machine.selectedState = stateIndex;
+        machine.selectedLane = static_cast<int> (state.lanes.size()) - 1;
+        inspectedMachine = &machine;
+
+        if (beginFreezeLane (machine, stateIndex, machine.selectedLane))
+            statusLabel.setText ("Rendering " + file.getFileName(), juce::dontSendNotification);
+        else
+            statusLabel.setText ("Render failed", juce::dontSendNotification);
+
+        markMachineDirty();
+        refreshControls();
+    }
+
     void refreshControls()
     {
         updateProjectFileLabel();
@@ -8771,12 +12383,20 @@ private:
         }
         refreezeLaneButton.setEnabled (! selectedLane.freezeInProgress);
         refreezeStaleButton.setEnabled ((mediaStatus.stale > 0 || mediaStatus.missing > 0) && freezingCount == 0);
+        renderAllButton.setEnabled (freezingCount == 0);
         breadcrumbLabel.setText (makeBreadcrumb(), juce::dontSendNotification);
         stateSummaryLabel.setText (makeStateSummary(), juce::dontSendNotification);
         const auto& inspectedState = currentInspectorMachine().state (currentInspectorMachine().selectedState);
         stateTempoEditor.setText (juce::String (inspectedState.tempoBpm, 1), false);
         stateMeterBeatsEditor.setText (juce::String (inspectedState.beatsPerBar), false);
         stateMeterUnitEditor.setText (juce::String (inspectedState.beatUnit), false);
+        stateDurationModeButton.setButtonText (inspectedState.durationUsesSeconds ? "Secs" : "Bars");
+        stateDurationBarsEditor.setText (juce::String (inspectedState.arrangementBars), false);
+        stateDurationBeatsEditor.setText (juce::String (inspectedState.arrangementBeats), false);
+        stateDurationSecondsEditor.setText (juce::String (inspectedState.durationSeconds, 2), false);
+        stateDurationBarsEditor.setEnabled (! inspectedState.durationUsesSeconds);
+        stateDurationBeatsEditor.setEnabled (! inspectedState.durationUsesSeconds);
+        stateDurationSecondsEditor.setEnabled (inspectedState.durationUsesSeconds);
         if (auto* child = selectedNestedMachine())
         {
             nestedModeBox.setEnabled (true);
@@ -8798,8 +12418,13 @@ private:
         topStateCountEditor.setText (juce::String (machine.getStateCount()), false);
         const auto arrangementVisible = arrangementViewMode > 0;
         arrangementStrip.setVisible (arrangementVisible);
-        graph.setVisible (arrangementViewMode != 2);
+        graph.setVisible (false);
+        orbitCanvas.setVisible (arrangementViewMode != 2);
         arrangementStrip.setMachine (machine, rateSlider.getValue(), arrangementViewMode == 2, exportInProgress, exportElapsedSeconds, exportTotalSeconds);
+        if (orbitFocusedTrack >= machine.getStateCount())
+            orbitFocusedTrack = -1;
+        orbitCanvas.setShapeEditMode (orbitShapeEditMode);
+        orbitCanvas.setMachine (machine, rateSlider.getValue(), fsmRunning, orbitFocusedTrack);
         updateArrangementButtonText();
         arrangementViewButton.setColour (juce::TextButton::buttonColourId,
                                          arrangementVisible ? rowFill().interpolatedWith (graphColour (machine.selectedState + 2), arrangementViewMode == 2 ? 0.30f : 0.20f)
@@ -8808,7 +12433,7 @@ private:
                                          arrangementVisible ? graphColour (machine.selectedState + 2).brighter (0.12f)
                                                             : mutedInk());
         const auto selectedLanePlaying = currentInspectorMachine().selectedLaneRef().playing;
-        playButton.setButtonText (selectedLanePlaying ? "Stop" : "Play");
+        playButton.setButtonText (selectedLanePlaying ? "Stop" : "Audition");
         playButton.setColour (juce::TextButton::buttonColourId,
                               selectedLanePlaying ? rowFill().interpolatedWith (graphColour (currentInspectorMachine().selectedLane, 4), 0.24f)
                                                   : rowFill().interpolatedWith (graphColour (currentInspectorMachine().selectedLane), 0.16f));
@@ -8818,6 +12443,12 @@ private:
         stopAllButton.setEnabled (! exportInProgress || exportCancelRequested);
         runButton.setColour (juce::TextButton::buttonColourId, fsmRunning ? rowFill().interpolatedWith (graphColour (machine.selectedState), 0.24f)
                                                                           : rowFill().interpolatedWith (graphColour (machine.selectedState), 0.10f));
+        renderAllButton.setColour (juce::TextButton::buttonColourId, rowFill().interpolatedWith (accentB(), 0.14f));
+        renderAllButton.setColour (juce::TextButton::textColourOffId, accentB().brighter (0.06f));
+        shapeEditButton.setToggleState (orbitShapeEditMode, juce::dontSendNotification);
+        shapeEditButton.setColour (juce::TextButton::buttonColourId, orbitShapeEditMode ? rowFill().interpolatedWith (accentB(), 0.22f)
+                                                                                        : rowFill().interpolatedWith (accentB(), 0.08f));
+        shapeEditButton.setColour (juce::TextButton::textColourOffId, orbitShapeEditMode ? accentB().brighter (0.08f) : mutedInk());
         stepButton.setColour (juce::TextButton::buttonColourId, rowFill().interpolatedWith (graphColour (machine.selectedState + 1), 0.10f));
         stopAllButton.setColour (juce::TextButton::buttonColourId, rowFill().interpolatedWith (graphColour (machine.selectedState + 4), 0.10f));
         moveLaneUpButton.setEnabled (currentInspectorMachine().selectedLane > 0);
@@ -8828,6 +12459,7 @@ private:
         removeChildMachineButton.setEnabled (hasChild);
         navigator.setMachines (machine, activeMachine, inspectedMachine);
         graph.repaint();
+        orbitCanvas.repaint();
         rules.repaint();
         graph.setInspectedMachine (&currentInspectorMachine());
         updateTransitionPreview();
@@ -8841,6 +12473,7 @@ private:
         refreshTrackList();
         navigator.repaint();
         graph.repaint();
+        orbitCanvas.repaint();
         rules.repaint();
         repaint();
     }
@@ -8879,12 +12512,14 @@ private:
         mixer.setState (s, inspected.selectedLane, fsmRunning);
     }
 
+    OfLookAndFeel ofLookAndFeel;
     MachineModel machine;
     MachineModel* activeMachine = &machine;
     MachineModel* inspectedMachine = &machine;
     std::vector<MachineModel*> machineStack;
     SuperColliderHost host;
     GraphComponent graph;
+    OrbitTrackCanvas orbitCanvas;
     juce::TextButton graphFitButton;
     juce::TextButton graphLayoutButton;
     juce::TextButton arrangementViewButton;
@@ -8912,6 +12547,7 @@ private:
     juce::TextButton runButton;
     juce::TextButton stepButton;
     juce::TextButton stopAllButton;
+    juce::TextButton renderAllButton;
     juce::Slider rateSlider;
     PillBar stateTabs;
     ArrangementStripComponent arrangementStrip;
@@ -8927,6 +12563,10 @@ private:
     juce::TextEditor stateMeterBeatsEditor;
     juce::Label stateMeterSlashLabel;
     juce::TextEditor stateMeterUnitEditor;
+    juce::TextButton stateDurationModeButton;
+    juce::TextEditor stateDurationBarsEditor;
+    juce::TextEditor stateDurationBeatsEditor;
+    juce::TextEditor stateDurationSecondsEditor;
     juce::Label nestedTimingLabel;
     juce::ComboBox nestedModeBox;
     juce::Label nestedDivisionLabel;
@@ -8937,6 +12577,8 @@ private:
     juce::TextButton mixerModeButton;
     juce::Label trackPaneTitle;
     juce::TextEditor trackNameEditor;
+    juce::TextButton shapeEditButton;
+    juce::TextButton resetShapeButton;
     juce::Label freezeStatusLabel;
     juce::TextButton refreezeLaneButton;
     juce::TextButton refreezeStaleButton;
@@ -8969,7 +12611,15 @@ private:
     bool codeExpanded = false;
     int headerCompactLevel = 0;
     int arrangementViewMode = 0;
+    bool orbitShapeEditMode = false;
+    int orbitFocusedTrack = -1;
+    int selectedRenderedWaveformState = -1;
+    int selectedRenderedWaveformLane = -1;
     bool fsmRunning = false;
+    int playbackGeneration = 0;
+    std::unordered_map<std::string, int> renderedLaneLoopVersions;
+    double orbitConnectionTransportStartMs = 0.0;
+    std::vector<float> previousOrbitConnectionPhases;
     bool machinePrepared = false;
     bool exportInProgress = false;
     bool exportCancelRequested = false;
@@ -9006,11 +12656,13 @@ private:
     juce::String pendingCheckId;
     std::unordered_map<std::string, LaneMeterState> laneMeters;
     std::unique_ptr<juce::FileChooser> projectChooser;
+    std::unique_ptr<juce::AlertWindow> laneDurationPrompt;
     juce::File currentProjectFile;
     juce::File loadingProjectDirectory;
     ProjectMediaStatus cachedProjectMediaStatus;
     juce::String lastProjectMediaStatus = "Project ready";
     juce::StringArray recentProjects;
+    RenderedAudioPlayer renderedAudioPlayer;
     juce::AudioDeviceManager audioDeviceManager;
     std::unique_ptr<SettingsWindow> settingsWindow;
     std::unique_ptr<AudioExportWindow> exportWindow;
@@ -9037,11 +12689,11 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
 
-class WfApplication final : public juce::JUCEApplication,
+class OfApplication final : public juce::JUCEApplication,
                                 private juce::MenuBarModel
 {
 public:
-    const juce::String getApplicationName() override { return "wf::"; }
+    const juce::String getApplicationName() override { return "of::"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
@@ -9107,7 +12759,7 @@ private:
             menu.addItem (welcomeItem, "Welcome");
             menu.addItem (settingsItem, "Settings...");
             menu.addSeparator();
-            menu.addItem (aboutItem, "About wf::");
+            menu.addItem (aboutItem, "About of::");
         }
 
         return menu;
@@ -9170,4 +12822,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION (WfApplication)
+START_JUCE_APPLICATION (OfApplication)

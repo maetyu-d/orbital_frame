@@ -5,6 +5,7 @@
 #include "DemoScripts.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -16,6 +17,24 @@ enum class NestedTimingMode
     freeRun,
     oneShot,
     latch
+};
+
+enum class LaneDurationMode
+{
+    endOfBeat,
+    endOfBar,
+    fixedBars,
+    fixedSeconds,
+    natural
+};
+
+enum class OrbitConnectionAction
+{
+    start,
+    pause,
+    restart,
+    reverse,
+    programmable
 };
 
 inline juce::String nestedTimingModeName (NestedTimingMode mode)
@@ -53,6 +72,13 @@ struct Lane
     bool freezeStale = false;
     bool freezeInProgress = false;
     juce::String frozenAudioPath;
+    double frozenDurationSeconds = 0.0;
+    juce::String sourceScriptPath;
+    float orbitPhase = 0.0f;
+    LaneDurationMode durationMode = LaneDurationMode::natural;
+    double durationValue = 1.0;
+    double fadeInSeconds = 0.0;
+    double fadeOutSeconds = 0.0;
     bool playing = false;
     int preparedBridge = -1;
 };
@@ -79,6 +105,10 @@ struct State
     int beatsPerBar = 4;
     int beatUnit = 4;
     int arrangementBars = 1;
+    int arrangementBeats = 0;
+    bool durationUsesSeconds = false;
+    double durationSeconds = 8.0;
+    std::array<float, 8> orbitWarp {};
 
     double secondsPerBar() const
     {
@@ -92,13 +122,19 @@ struct State
     {
         const auto beats = juce::jlimit (1, 32, beatsPerBar);
         const auto unit = juce::jlimit (1, 32, beatUnit);
-        const auto bars = juce::jlimit (1, 64, arrangementBars);
-        return static_cast<double> (beats) * (4.0 / static_cast<double> (unit)) * static_cast<double> (bars);
+        const auto barBeats = static_cast<double> (beats) * (4.0 / static_cast<double> (unit));
+        const auto bars = juce::jlimit (0, 64, arrangementBars);
+        const auto extraBeats = juce::jlimit (0, 256, arrangementBeats) * (4.0 / static_cast<double> (unit));
+        return juce::jmax (0.125, barBeats * static_cast<double> (bars) + extraBeats);
     }
 
     double secondsPerSection() const
     {
-        return secondsPerBar() * static_cast<double> (juce::jlimit (1, 64, arrangementBars));
+        if (durationUsesSeconds)
+            return juce::jlimit (0.25, 3600.0, durationSeconds);
+
+        const auto bpm = juce::jlimit (20.0, 320.0, tempoBpm);
+        return clockBeatsPerSection() * (60.0 / bpm);
     }
 };
 
@@ -107,6 +143,16 @@ struct Rule
     int from = 0;
     int to = 0;
     float weight = 1.0f;
+};
+
+struct OrbitConnection
+{
+    int sourceState = 0;
+    int sourceLane = 0;
+    float sourcePhase = 0.0f;
+    int targetState = 0;
+    OrbitConnectionAction action = OrbitConnectionAction::start;
+    juce::String fabricScript;
 };
 
 class MachineModel
@@ -147,7 +193,7 @@ public:
             states[static_cast<size_t> (i)].index = i;
             states[static_cast<size_t> (i)].name = "State " + juce::String (i + 1);
             states[static_cast<size_t> (i)].lanes.push_back (
-                { makeLaneId (i, 0), "Lane 1", WfDemo::defaultScriptFor (i, 0) });
+                { makeLaneId (i, 0), "Lane 1", OfDemo::defaultScriptFor (i, 0) });
         }
 
         for (int i = 0; i < newCount; ++i)
@@ -157,6 +203,10 @@ public:
         {
             return rule.from >= newCount || rule.to >= newCount;
         }), rules.end());
+        orbitConnections.erase (std::remove_if (orbitConnections.begin(), orbitConnections.end(), [newCount] (const OrbitConnection& connection)
+        {
+            return connection.sourceState >= newCount || connection.targetState >= newCount;
+        }), orbitConnections.end());
 
         selectedState = juce::jlimit (0, newCount - 1, selectedState);
         selectedLane = juce::jlimit (0, getLaneCount (selectedState) - 1, selectedLane);
@@ -180,7 +230,7 @@ public:
         const auto laneIndex = static_cast<int> (s.lanes.size());
         s.lanes.push_back ({ makeLaneId (selectedState, laneIndex),
                              "Lane " + juce::String (laneIndex + 1),
-                             WfDemo::defaultScriptFor (selectedState, laneIndex) });
+                             OfDemo::defaultScriptFor (selectedState, laneIndex) });
         selectedLane = laneIndex;
     }
 
@@ -353,6 +403,9 @@ public:
         s.beatsPerBar = 4;
         s.beatUnit = 4;
         s.arrangementBars = 4;
+        s.arrangementBeats = 0;
+        s.durationUsesSeconds = false;
+        s.durationSeconds = s.secondsPerSection();
         s.lanes.clear();
         s.lanes.push_back ({ makeLaneId (0, 0), "Lane 1", {} });
 
@@ -477,14 +530,14 @@ public:
             auto role = juce::String (lane.second);
             Lane demoLane { makeLaneId (stateIndex, laneIndex),
                             lane.first,
-                            WfDemo::scriptForRole (role, stateIndex, laneIndex) };
-            demoLane.volume = WfDemo::volumeForRole (role);
+                            OfDemo::scriptForRole (role, stateIndex, laneIndex) };
+            demoLane.volume = OfDemo::volumeForRole (role);
             s.lanes.push_back (std::move (demoLane));
             ++laneIndex;
         }
 
         if (s.lanes.empty())
-            s.lanes.push_back ({ makeLaneId (stateIndex, 0), "Lane 1", WfDemo::defaultScriptFor (stateIndex, 0) });
+            s.lanes.push_back ({ makeLaneId (stateIndex, 0), "Lane 1", OfDemo::defaultScriptFor (stateIndex, 0) });
     }
 
     void setStateDemo (int stateIndex, const juce::String& name, std::initializer_list<std::pair<const char*, const char*>> laneDefs)
@@ -503,12 +556,13 @@ public:
 
     void setStateArrangementBars (int stateIndex, int bars)
     {
-        state (stateIndex).arrangementBars = juce::jlimit (1, 64, bars);
+        state (stateIndex).arrangementBars = juce::jlimit (0, 64, bars);
     }
 
     std::vector<State> states;
     std::vector<std::unique_ptr<MachineModel>> childMachines;
     std::vector<Rule> rules;
+    std::vector<OrbitConnection> orbitConnections;
     std::vector<juce::Point<float>> nodeOffsets;
     juce::String machineId;
     juce::String lanePrefix;

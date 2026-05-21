@@ -44,6 +44,7 @@ public:
     ~SuperColliderHost();
 
     void play (Lane& lane, const juce::String& sclangPath);
+    void playLive (Lane& lane, const juce::String& sclangPath);
     bool prepare (Lane& lane, const juce::String& sclangPath);
     int prepareData (const LaneSnapshot& lane, const juce::String& sclangPath);
     bool freezeLane (Lane& lane, const juce::String& sclangPath, double durationSeconds, const juce::File& outputFile);
@@ -102,6 +103,7 @@ private:
     void sendStopAllCommand();
     void sendClearMachineCommand();
     bool shouldUseCommandFallback() const;
+    bool shouldSendOscCommand() const;
     void writeCommand (const juce::String& command);
     void shutdown();
     static void markAllLanesStopped (MachineModel& model);

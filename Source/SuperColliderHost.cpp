@@ -7,7 +7,7 @@
 
 namespace
 {
-constexpr int superColliderLanguagePort = 57141;
+constexpr int superColliderLanguagePort = 57143;
 
 enum class LatencyProfile
 {
@@ -38,6 +38,29 @@ constexpr AudioProfile getAudioProfile()
 
 std::atomic<int> tempScriptSerial { 0 };
 
+juce::String normalizeLaneScriptForBridge (juce::String source)
+{
+    const auto oldPrefix = juce::String::charToString ('w') + juce::String::charToString ('f');
+    source = source.replace ("~" + oldPrefix + "TempoHz", "~ofTempoHz");
+
+    juce::StringArray lines;
+    lines.addLines (source);
+
+    juce::String normalized;
+    for (const auto& line : lines)
+    {
+        const auto trimmed = line.trim();
+        if (trimmed == "(" || trimmed == ")")
+            continue;
+
+        normalized << line << "\n";
+        if (trimmed.contains (").add"))
+            normalized << "s.sync;\n";
+    }
+
+    return normalized.trim();
+}
+
 juce::File makeTempScript (const juce::String& laneKey, const juce::String& source)
 {
     auto safeKey = laneKey.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_");
@@ -45,15 +68,15 @@ juce::File makeTempScript (const juce::String& laneKey, const juce::String& sour
         safeKey = "lane";
 
     auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                   .getChildFile ("wf")
+                   .getChildFile ("of")
                    .getChildFile ("runtime")
                    .getChildFile ("lane-scripts");
     dir.createDirectory();
 
     const auto unique = juce::String::toHexString (juce::Time::currentTimeMillis())
                       + "-" + juce::String (++tempScriptSerial);
-    auto file = dir.getChildFile ("wf-" + safeKey + "-" + unique + ".scd");
-    file.replaceWithText (source);
+    auto file = dir.getChildFile ("of-" + safeKey + "-" + unique + ".scd");
+    file.replaceWithText (normalizeLaneScriptForBridge (source));
     return file;
 }
 
@@ -105,7 +128,7 @@ juce::String injectLaneMetering (juce::String source, const juce::String& laneId
     const auto originalLine = source.substring (expressionStart, expressionEnd);
     const auto trimmedLeft = originalLine.trimStart();
     const auto indent = originalLine.substring (0, originalLine.length() - trimmedLeft.length());
-    const auto meteredLine = indent + "~wfMetered.(" + scSymbolLiteral (laneId) + ", " + expression + ");";
+    const auto meteredLine = indent + "~ofMetered.(" + scSymbolLiteral (laneId) + ", " + expression + ");";
 
     return source.substring (0, expressionStart) + meteredLine + source.substring (expressionEnd + 1);
 }
@@ -225,7 +248,7 @@ juce::String shellQuote (juce::String value)
 juce::File runtimeDirectory()
 {
     auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                   .getChildFile ("wf")
+                   .getChildFile ("of")
                    .getChildFile ("runtime");
     dir.createDirectory();
     return dir;
@@ -243,10 +266,18 @@ void killStaleBridgeProcesses()
     const auto bridgeScriptPath = runtimeDirectory().getChildFile ("sc-bridge")
                                                     .getChildFile ("bridge.scd")
                                                     .getFullPathName();
+    const auto oldBridgeScriptPath = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                         .getChildFile (juce::String::charToString ('w') + juce::String::charToString ('f'))
+                                         .getChildFile ("runtime")
+                                         .getChildFile ("sc-bridge")
+                                         .getChildFile ("bridge.scd")
+                                         .getFullPathName();
     juce::StringArray args;
     args.add ("/bin/sh");
     args.add ("-c");
-    args.add ("/usr/bin/pkill -f " + shellQuote (bridgeScriptPath) + " >/dev/null 2>&1 || true");
+    args.add ("/usr/bin/pkill -f " + shellQuote (bridgeScriptPath)
+              + " >/dev/null 2>&1 || true; /usr/bin/pkill -f "
+              + shellQuote (oldBridgeScriptPath) + " >/dev/null 2>&1 || true");
 
     juce::ChildProcess killer;
     if (killer.start (args))
@@ -272,12 +303,28 @@ void SuperColliderHost::play(Lane& lane, const juce::String& sclangPath)
             return;
         }
 
-        if (lane.preparedBridge != bridgeGeneration && ! prepare (lane, sclangPath))
+        const auto shouldForceFrozenReload = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+        if ((shouldForceFrozenReload || lane.preparedBridge != bridgeGeneration) && ! prepare (lane, sclangPath))
             return;
 
         sendPlayCommand (lane.id);
         lane.playing = true;
         setStatus ("Playing " + lane.name);
+    }
+
+void SuperColliderHost::playLive(Lane& lane, const juce::String& sclangPath)
+    {
+        appendRuntimeLog ("live audition requested: " + lane.id);
+        if (lane.playing)
+            stop (lane, 0.08);
+
+        if (prepareData ({ lane.id, lane.name, lane.script, lane.volume, lane.gain, lane.pan, false, false, {} }, sclangPath) < 0)
+            return;
+
+        sendPlayCommand (lane.id);
+        lane.preparedBridge = -1;
+        lane.playing = true;
+        setStatus ("Auditioning " + lane.name);
     }
 
 bool SuperColliderHost::prepare(Lane& lane, const juce::String& sclangPath)
@@ -299,6 +346,7 @@ int SuperColliderHost::prepareData(const LaneSnapshot& lane, const juce::String&
 
         if (lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty())
         {
+            appendRuntimeLog ("loading frozen: " + lane.id + " -> " + lane.frozenAudioPath);
             sendLoadFrozenCommand (lane.id, lane.frozenAudioPath);
             sendMixCommand (lane.id, lane.volume * lane.gain, lane.pan);
             addLog ("Loaded frozen " + lane.name);
@@ -307,6 +355,9 @@ int SuperColliderHost::prepareData(const LaneSnapshot& lane, const juce::String&
         }
 
         auto script = lane.script;
+        appendRuntimeLog ("loading live: " + lane.id + " frozen=" + juce::String (lane.frozen ? "true" : "false")
+                         + " stale=" + juce::String (lane.freezeStale ? "true" : "false")
+                         + " frozenPath=" + lane.frozenAudioPath);
         script = injectLaneMetering (script, lane.id);
         auto scriptFile = makeTempScript (lane.id, script);
 
@@ -503,7 +554,7 @@ void SuperColliderHost::stopAll(MachineModel& model)
             sendStopAllCommand();
 
         markAllLanesStopped (model);
-        addLog ("Stopped all wf lanes");
+        addLog ("Stopped all of lanes");
         setStatus (bridgeProcess != nullptr && bridgeProcess->isRunning() ? "Audio ready" : "Audio offline");
     }
 
@@ -569,10 +620,10 @@ void SuperColliderHost::panic(MachineModel& model)
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
         {
             if (oscConnected)
-                oscSender.send ("/wf/panic");
+                oscSender.send ("/of/panic");
 
             if (shouldUseCommandFallback())
-                writeCommand ("~wfStopAll.();\n");
+                writeCommand ("~ofStopAll.();\n");
         }
 
         markAllLanesStopped (model);
@@ -591,7 +642,7 @@ void SuperColliderHost::configureMachine(const MachineModel& model)
             return;
         }
 
-        writeCommand ("~wfConfigureMachine.(" + machineAsSuperColliderEvent (model) + ");\n");
+        writeCommand ("~ofConfigureMachine.(" + machineAsSuperColliderEvent (model) + ");\n");
         addLog ("FSM prepared");
     }
 
@@ -602,7 +653,7 @@ void SuperColliderHost::runMachine(int startState, double rateHz)
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
         {
             const auto rate = juce::jlimit (0.05, 8.0, rateHz);
-            writeCommand ("~wfRunMachine.(" + juce::String (juce::jmax (0, startState))
+            writeCommand ("~ofRunMachine.(" + juce::String (juce::jmax (0, startState))
                           + ", " + scFloatLiteral (rate) + ");\n");
         }
     }
@@ -612,7 +663,7 @@ void SuperColliderHost::pauseMachine()
         const juce::ScopedLock lock (hostLock);
 
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
-            writeCommand ("~wfPauseMachine.();\n");
+            writeCommand ("~ofPauseMachine.();\n");
     }
 
 void SuperColliderHost::stepMachine()
@@ -620,7 +671,7 @@ void SuperColliderHost::stepMachine()
         const juce::ScopedLock lock (hostLock);
 
         if (bridgeProcess != nullptr && bridgeProcess->isRunning())
-            writeCommand ("~wfStepMachine.();\n");
+            writeCommand ("~ofStepMachine.();\n");
     }
 
 void SuperColliderHost::cancelExport()
@@ -643,18 +694,18 @@ void SuperColliderHost::testTone(const juce::String& sclangPath)
             return;
 
         appendRuntimeLog ("test tone requested");
-        if (oscConnected)
+        if (shouldSendOscCommand())
         {
-            oscSender.send ("/wf/test");
+            oscSender.send ("/of/test");
             juce::Timer::callAfterDelay (650, [this]
             {
                 const juce::ScopedLock retryLock (hostLock);
-                if (oscConnected)
-                    oscSender.send ("/wf/test");
+                if (shouldSendOscCommand())
+                    oscSender.send ("/of/test");
             });
         }
         else
-            writeCommand ("~wfTest.();\n");
+            writeCommand ("~ofTest.();\n");
 
         addLog ("Test tone requested");
     }
@@ -757,68 +808,92 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "s.options.numOutputBusChannels = " + outputChannels + ";\n"
                "s.options.memSize = 262144;\n"
                "s.boot;\n"
-               "~wfFade = " + crossfade + ";\n"
-               "~wfAttack = " + attack + ";\n"
-               "~wfRelease = " + defaultRelease + ";\n"
-               "~wfServerReady = false;\n"
-               "~wfPending = List.new;\n"
-               "~wfWhenReady = { |func|\n"
-               "    if (~wfServerReady) {\n"
+               "~ofFade = " + crossfade + ";\n"
+               "~ofAttack = " + attack + ";\n"
+               "~ofRelease = " + defaultRelease + ";\n"
+               "~ofServerReady = false;\n"
+               "~ofPending = List.new;\n"
+               "~ofWhenReady = { |func|\n"
+               "    if (~ofServerReady) {\n"
                "        func.value;\n"
                "    } {\n"
-               "        ~wfPending.add(func);\n"
+               "        ~ofPending.add(func);\n"
                "        s.waitForBoot {\n"
-               "            ~wfServerReady = true;\n"
-               "            ~wfPending.do { |pending| pending.value };\n"
-               "            ~wfPending.clear;\n"
+               "            ~ofServerReady = true;\n"
+               "            ~ofPending.do { |pending| pending.value };\n"
+               "            ~ofPending.clear;\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~wfObjects = IdentityDictionary.new;\n"
-               "~wfStopTokens = IdentityDictionary.new;\n"
-               "~wfVolumes = IdentityDictionary.new;\n"
-               "~wfPans = IdentityDictionary.new;\n"
-               "~wfPrograms = IdentityDictionary.new;\n"
-               "~wfFrozenPaths = IdentityDictionary.new;\n"
-               "~wfFrozenBuffers = IdentityDictionary.new;\n"
-               "~wfFrozenBufferPaths = IdentityDictionary.new;\n"
-               "~wfLaneBuses = IdentityDictionary.new;\n"
-               "~wfLaneRouters = IdentityDictionary.new;\n"
-               "~wfMeterIds = IdentityDictionary.new;\n"
-               "~wfMeterKeys = IdentityDictionary.new;\n"
-               "~wfNextMeterId = 1;\n"
-               "~wfExportCancel = false;\n"
-               "~wfExporting = false;\n"
-               "~wfMasterGain = 1.0;\n"
-               "~wfJuce = NetAddr(\"127.0.0.1\", 57142);\n"
+               "~ofObjects = IdentityDictionary.new;\n"
+               "~ofStopTokens = IdentityDictionary.new;\n"
+               "~ofVolumes = IdentityDictionary.new;\n"
+               "~ofPans = IdentityDictionary.new;\n"
+               "~ofPrograms = IdentityDictionary.new;\n"
+               "~ofProgramUsesLaneBus = IdentityDictionary.new;\n"
+               "~ofFrozenPaths = IdentityDictionary.new;\n"
+               "~ofFrozenBuffers = IdentityDictionary.new;\n"
+               "~ofFrozenBufferPaths = IdentityDictionary.new;\n"
+               "~ofLaneBuses = IdentityDictionary.new;\n"
+               "~ofLaneRouters = IdentityDictionary.new;\n"
+               "~ofMeterIds = IdentityDictionary.new;\n"
+               "~ofMeterKeys = IdentityDictionary.new;\n"
+               "~ofNextMeterId = 1;\n"
+               "~ofExportCancel = false;\n"
+               "~ofExporting = false;\n"
+               "~ofMasterGain = 1.0;\n"
+               "~ofJuce = NetAddr(\"127.0.0.1\", 57142);\n"
+               "~ofTempoHz = 1.0;\n"
                "~markovTempoHz = 1.0;\n"
-               "~wfLoad = { |key, path|\n"
+               "~ofNormalizeSource = { |source|\n"
+               "    var lines = source.split($\\n);\n"
+               "    var out = \"\";\n"
+               "    lines.do { |line|\n"
+               "        var trimmed = line.stripWhiteSpace;\n"
+               "        if ((trimmed != \"(\") and: { trimmed != \")\" }) {\n"
+               "            out = out ++ line ++ \"\\n\";\n"
+               "            if (trimmed.find(\").add\").notNil) { out = out ++ \"s.sync;\\n\" };\n"
+               "        };\n"
+               "    };\n"
+               "    out;\n"
+               "};\n"
+               "~ofLoad = { |key, path|\n"
                "    var file, source;\n"
-               "    ~wfStop.(key, 0.025);\n"
-               "    ~wfPrograms.removeAt(key);\n"
-               "    ~wfFrozenPaths.removeAt(key);\n"
+               "    ~ofStop.(key, 0.025);\n"
+               "    ~ofPrograms.removeAt(key);\n"
+               "    ~ofProgramUsesLaneBus.removeAt(key);\n"
+               "    ~ofFrozenPaths.removeAt(key);\n"
                "    file = File(path, \"r\");\n"
-               "    if (file.isOpen.not) { (\"wf could not open lane: \" ++ path).warn; ^nil };\n"
+               "    if (file.isOpen.not) { (\"of could not open lane: \" ++ path).warn; ^nil };\n"
                "    source = file.readAllString;\n"
                "    file.close;\n"
-               "    ~wfPrograms[key] = (\"{ \" ++ source ++ \" }\").interpret;\n"
+               "    source = ~ofNormalizeSource.(source);\n"
+               "    ~ofProgramUsesLaneBus[key] = source.find(\"~ofMetered\").notNil;\n"
+               "    try {\n"
+               "        ~ofPrograms[key] = (\"{ \" ++ source ++ \" }\").interpret;\n"
+               "    } { |error|\n"
+               "        (\"OF_LOAD_ERROR \" ++ key ++ \" \" ++ error.errorString).postln;\n"
+               "    };\n"
                "};\n"
-               "~wfLoadFrozen = { |key, path|\n"
-               "    ~wfStop.(key, 0.025);\n"
-               "    ~wfPrograms.removeAt(key);\n"
-               "    ~wfFrozenPaths[key] = path;\n"
+               "~ofLoadFrozen = { |key, path|\n"
+               "    ~ofStop.(key, 0.025);\n"
+               "    ~ofPrograms.removeAt(key);\n"
+               "    ~ofProgramUsesLaneBus.removeAt(key);\n"
+               "    if (~ofFrozenBuffers[key].notNil) { ~ofFrozenBuffers[key].free; ~ofFrozenBuffers.removeAt(key) };\n"
+               "    ~ofFrozenBufferPaths.removeAt(key);\n"
+               "    ~ofFrozenPaths[key] = path;\n"
                "};\n"
-               "~wfWriteCheckResult = { |resultPath, text|\n"
+               "~ofWriteCheckResult = { |resultPath, text|\n"
                "    var out = File(resultPath, \"w\");\n"
                "    if (out.isOpen) { out.write(text); out.close };\n"
                "};\n"
-               "~wfCheck = { |checkId, path, resultPath|\n"
+               "~ofCheck = { |checkId, path, resultPath|\n"
                "    var file, source;\n"
-               "    (\"WF_CHECK_BEGIN \" ++ checkId).postln;\n"
+               "    (\"OF_CHECK_BEGIN \" ++ checkId).postln;\n"
                "    file = File(path, \"r\");\n"
                "    if (file.isOpen.not) {\n"
-               "        ~wfWriteCheckResult.(resultPath, \"ERROR could not open script file\");\n"
-               "        (\"WF_CHECK_ERROR \" ++ checkId ++ \" could not open script file\").postln;\n"
+               "        ~ofWriteCheckResult.(resultPath, \"ERROR could not open script file\");\n"
+               "        (\"OF_CHECK_ERROR \" ++ checkId ++ \" could not open script file\").postln;\n"
                "        ^nil;\n"
                "    };\n"
                "    source = file.readAllString;\n"
@@ -826,120 +901,120 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    try {\n"
                "        var compiled = (\"{ \" ++ source ++ \" }\").compile;\n"
                "        if (compiled.isNil) {\n"
-               "            ~wfWriteCheckResult.(resultPath, \"ERROR compile failed\");\n"
-               "            (\"WF_CHECK_ERROR \" ++ checkId ++ \" compile failed\").postln;\n"
+               "            ~ofWriteCheckResult.(resultPath, \"ERROR compile failed\");\n"
+               "            (\"OF_CHECK_ERROR \" ++ checkId ++ \" compile failed\").postln;\n"
                "        } {\n"
-               "            ~wfWriteCheckResult.(resultPath, \"OK\");\n"
-               "            (\"WF_CHECK_OK \" ++ checkId).postln;\n"
+               "            ~ofWriteCheckResult.(resultPath, \"OK\");\n"
+               "            (\"OF_CHECK_OK \" ++ checkId).postln;\n"
                "        };\n"
                "    } { |error|\n"
-               "        ~wfWriteCheckResult.(resultPath, \"ERROR \" ++ error.errorString);\n"
-               "        (\"WF_CHECK_ERROR \" ++ checkId ++ \" \" ++ error.errorString).postln;\n"
+               "        ~ofWriteCheckResult.(resultPath, \"ERROR \" ++ error.errorString);\n"
+               "        (\"OF_CHECK_ERROR \" ++ checkId ++ \" \" ++ error.errorString).postln;\n"
                "    };\n"
                "};\n"
-               "SynthDef(\\wfLaneRouter, { |bus = 0, replyId = 0|\n"
+               "SynthDef(\\ofLaneRouter, { |bus = 0, replyId = 0|\n"
                "    var sig = In.ar(bus, 2);\n"
                "    var mono = Mix(sig) * 0.5;\n"
                "    var meterTrig = Impulse.kr(30, 0) + Trig1.kr(1, ControlDur.ir);\n"
                "    var rms = Amplitude.kr(mono, 0.004, 0.055).clip(0, 1);\n"
                "    var peak = Peak.kr(mono.abs, meterTrig).clip(0, 1);\n"
-               "    SendReply.kr(meterTrig, '/wf/laneMeter', [rms, peak], replyId);\n"
+               "    SendReply.kr(meterTrig, '/of/laneMeter', [rms, peak], replyId);\n"
                "    Out.ar(0, sig);\n"
                "}).add;\n"
-               "SynthDef(\\wfFrozenPlayer, { |buf = 0, gate = 1, fade = 0.006, wfVol = 1, wfPan = 0, replyId = 0|\n"
-               "    var sig = PlayBuf.ar(2, buf, BufRateScale.kr(buf), loop: 1);\n"
-               "    var env = EnvGen.kr(Env.asr(fade.max(0.001), 1, fade.max(0.001)), gate, doneAction: 2);\n"
-               "    var controlled = Balance2.ar(sig[0], sig[1], Lag.kr(wfPan.clip(-1, 1), 0.02)) * env * Lag.kr(wfVol, 0.02);\n"
+               "SynthDef(\\ofFrozenPlayer, { |buf = 0, gate = 1, fade = 0.006, ofVol = 1, ofPan = 0, replyId = 0|\n"
+               "    var sig = PlayBuf.ar(2, buf, BufRateScale.kr(buf), loop: 0, doneAction: 2);\n"
+               "    var duration = BufDur.kr(buf).max(0.02);\n"
+               "    var env = EnvGen.kr(Env.asr(fade.max(0.001), 1, fade.max(0.001)), gate, timeScale: duration, doneAction: 0);\n"
+               "    var controlled = Balance2.ar(sig[0], sig[1], Lag.kr(ofPan.clip(-1, 1), 0.02)) * env * Lag.kr(ofVol, 0.02);\n"
                "    var mono = Mix(controlled) * 0.5;\n"
                "    var meterTrig = Impulse.kr(30, 0) + Trig1.kr(1, ControlDur.ir);\n"
                "    var rms = Amplitude.kr(mono, 0.004, 0.055).clip(0, 1);\n"
                "    var peak = Peak.kr(mono.abs, meterTrig).clip(0, 1);\n"
-               "    SendReply.kr(meterTrig, '/wf/laneMeter', [rms, peak], replyId);\n"
+               "    SendReply.kr(meterTrig, '/of/laneMeter', [rms, peak], replyId);\n"
                "    Out.ar(0, controlled);\n"
                "}).add;\n"
-               "OSCdef(\\wfLaneMeter, { |msg|\n"
-               "    var key = ~wfMeterKeys[msg[2].asInteger];\n"
-               "    if (key.notNil) { ~wfJuce.sendMsg('/wf/meter', key.asString, msg[3].asFloat, msg[4].asFloat) };\n"
-               "}, '/wf/laneMeter');\n"
-               "~wfMeterIdFor = { |key|\n"
-               "    var id = ~wfMeterIds[key];\n"
+               "OSCdef(\\ofLaneMeter, { |msg|\n"
+               "    var key = ~ofMeterKeys[msg[2].asInteger];\n"
+               "    if (key.notNil) { ~ofJuce.sendMsg('/of/meter', key.asString, msg[3].asFloat, msg[4].asFloat) };\n"
+               "}, '/of/laneMeter');\n"
+               "~ofMeterIdFor = { |key|\n"
+               "    var id = ~ofMeterIds[key];\n"
                "    if (id.isNil) {\n"
-               "        id = ~wfNextMeterId;\n"
-               "        ~wfNextMeterId = ~wfNextMeterId + 1;\n"
-               "        ~wfMeterIds[key] = id;\n"
-               "        ~wfMeterKeys[id] = key;\n"
+               "        id = ~ofNextMeterId;\n"
+               "        ~ofNextMeterId = ~ofNextMeterId + 1;\n"
+               "        ~ofMeterIds[key] = id;\n"
+               "        ~ofMeterKeys[id] = key;\n"
                "    };\n"
                "    id;\n"
                "};\n"
-               "~wfMetered = { |key, sig|\n"
+               "~ofMetered = { |key, sig|\n"
                "    var stereo = sig.asArray;\n"
-               "    var pan = Lag.kr(\\wfPan.kr(~wfPans[key] ? 0), 0.02).clip(-1, 1);\n"
+               "    var pan = Lag.kr(\\ofPan.kr(~ofPans[key] ? 0), 0.02).clip(-1, 1);\n"
                "    var controlled;\n"
                "    stereo = if (stereo.size < 2, { [stereo[0], stereo[0]] }, { [stereo[0], stereo[1]] });\n"
-               "    controlled = Balance2.ar(stereo[0], stereo[1], pan) * Lag.kr(\\wfVol.kr(~wfVolumes[key] ? 1), 0.02);\n"
-               "    Out.ar(~wfLaneBusFor.(key), controlled);\n"
+               "    controlled = Balance2.ar(stereo[0], stereo[1], pan) * Lag.kr(\\ofVol.kr(~ofVolumes[key] ? 1), 0.02);\n"
+               "    Out.ar(~ofLaneBusFor.(key), controlled);\n"
                "    Silent.ar(2);\n"
                "};\n"
-               "~wfStartLaneRouter = { |key, bus|\n"
-               "    var router = ~wfLaneRouters[key];\n"
-               "    var target = ~wfMaster ? s;\n"
+               "~ofStartLaneRouter = { |key, bus|\n"
+               "    var router = ~ofLaneRouters[key];\n"
+               "    var target = ~ofMaster ? s;\n"
                "    if (router.notNil) { router.free };\n"
-               "    ~wfLaneRouters[key] = Synth(\\wfLaneRouter,\n"
-               "        [\\bus, bus, \\replyId, ~wfMeterIdFor.(key)],\n"
+               "    ~ofLaneRouters[key] = Synth(\\ofLaneRouter,\n"
+               "        [\\bus, bus, \\replyId, ~ofMeterIdFor.(key)],\n"
                "        target: target,\n"
-               "        addAction: if (~wfMaster.notNil, { \\addBefore }, { \\addToTail }));\n"
+               "        addAction: if (~ofMaster.notNil, { \\addBefore }, { \\addToTail }));\n"
                "};\n"
-               "~wfLaneBusFor = { |key|\n"
-               "    var bus = ~wfLaneBuses[key];\n"
+               "~ofLaneBusFor = { |key|\n"
+               "    var bus = ~ofLaneBuses[key];\n"
                "    if (bus.isNil) {\n"
                "        bus = Bus.audio(s, 2);\n"
-               "        ~wfLaneBuses[key] = bus;\n"
-               "        ~wfStartLaneRouter.(key, bus);\n"
+               "        ~ofLaneBuses[key] = bus;\n"
+               "        ~ofStartLaneRouter.(key, bus);\n"
                "    };\n"
                "    bus;\n"
                "};\n"
-               "~wfStartMaster = {\n"
-               "    if (~wfMaster.notNil) { ~wfMaster.free };\n"
-               "    ~wfMaster = { |wfMasterGain = 1|\n"
+               "~ofStartMaster = {\n"
+               "    if (~ofMaster.notNil) { ~ofMaster.free };\n"
+               "    ~ofMaster = { |ofMasterGain = 1|\n"
                "        var in = In.ar(0, 2);\n"
                "        var low = HPF.ar(LeakDC.ar(in), 30);\n"
                "        var controlled = Compander.ar(low * 0.95, low, 0.24, 1, 0.30, 0.004, 0.20);\n"
-               "        ReplaceOut.ar(0, Limiter.ar(controlled.tanh * 0.78 * Lag.kr(wfMasterGain.clip(0, 5), 0.035), 0.92, 0.018));\n"
-               "    }.play(s, addAction: \\addToTail, args: [\\wfMasterGain, ~wfMasterGain]);\n"
+               "        ReplaceOut.ar(0, Limiter.ar(controlled.tanh * 0.78 * Lag.kr(ofMasterGain.clip(0, 5), 0.035), 0.92, 0.018));\n"
+               "    }.play(s, addAction: \\addToTail, args: [\\ofMasterGain, ~ofMasterGain]);\n"
                "};\n"
-               "~wfSetMasterGain = { |gain|\n"
-               "    ~wfMasterGain = gain.clip(0, 5);\n"
-               "    if (~wfMaster.notNil) { ~wfMaster.set(\\wfMasterGain, ~wfMasterGain) };\n"
+               "~ofSetMasterGain = { |gain|\n"
+               "    ~ofMasterGain = gain.clip(0, 5);\n"
+               "    if (~ofMaster.notNil) { ~ofMaster.set(\\ofMasterGain, ~ofMasterGain) };\n"
                "};\n"
-               "~wfSetVolume = { |key, volume|\n"
+               "~ofSetVolume = { |key, volume|\n"
                "    var obj;\n"
                "    volume = volume.clip(0, 2);\n"
-               "    ~wfVolumes[key] = volume;\n"
-               "    obj = ~wfObjects[key];\n"
-               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\wfVol, volume) };\n"
+               "    ~ofVolumes[key] = volume;\n"
+               "    obj = ~ofObjects[key];\n"
+               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\ofVol, volume) };\n"
                "};\n"
-               "~wfSetMix = { |key, volume, pan|\n"
+               "~ofSetMix = { |key, volume, pan|\n"
                "    var obj;\n"
                "    volume = volume.clip(0, 2);\n"
                "    pan = pan.clip(-1, 1);\n"
-               "    ~wfVolumes[key] = volume;\n"
-               "    ~wfPans[key] = pan;\n"
-               "    obj = ~wfObjects[key];\n"
-               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\wfVol, volume, \\wfPan, pan) };\n"
+               "    ~ofVolumes[key] = volume;\n"
+               "    ~ofPans[key] = pan;\n"
+               "    obj = ~ofObjects[key];\n"
+               "    if (obj.notNil and: { obj.respondsTo(\\set) }) { obj.set(\\ofVol, volume, \\ofPan, pan) };\n"
                "};\n"
-               "~wfStop = { |key, release|\n"
-               "    var obj = ~wfObjects[key];\n"
-               "    var token;\n"
-               "    release = release ? ~wfRelease;\n"
+               "~ofStop = { |key, release|\n"
+               "    var obj = ~ofObjects[key];\n"
+               "    var token = (~ofStopTokens[key] ? 0) + 1;\n"
+               "    ~ofStopTokens[key] = token;\n"
+               "    release = release ? ~ofRelease;\n"
                "    if (obj.notNil) {\n"
                "        if (obj.respondsTo(\\set)) {\n"
-               "            token = (~wfStopTokens[key] ? 0) + 1;\n"
-               "            ~wfStopTokens[key] = token;\n"
                "            obj.set(\\gate, 0, \\fade, release);\n"
                "            SystemClock.sched(release + 0.12, {\n"
-               "                if ((~wfObjects[key] === obj) and: { ~wfStopTokens[key] == token }) {\n"
-               "                    ~wfObjects.removeAt(key);\n"
-               "                    ~wfStopTokens.removeAt(key);\n"
+               "                if ((~ofObjects[key] === obj) and: { ~ofStopTokens[key] == token }) {\n"
+               "                    ~ofObjects.removeAt(key);\n"
+               "                    ~ofStopTokens.removeAt(key);\n"
                "                };\n"
                "                nil;\n"
                "            });\n"
@@ -947,205 +1022,216 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "            if (obj.respondsTo(\\run)) { obj.run(false) } {\n"
                "                if (obj.respondsTo(\\stop)) { obj.stop };\n"
                "            };\n"
-               "            ~wfObjects.removeAt(key);\n"
+               "            ~ofObjects.removeAt(key);\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~wfStopAll = {\n"
-               "    if (~wfPauseMachine.notNil) { ~wfPauseMachine.() };\n"
-               "    ~wfObjects.keys.copy.do { |key| ~wfStop.(key, 0.025) };\n"
+               "~ofStopAll = {\n"
+               "    if (~ofPauseMachine.notNil) { ~ofPauseMachine.() };\n"
+               "    ~ofObjects.keys.copy.do { |key| ~ofStop.(key, 0.025) };\n"
                "};\n"
-               "~wfClearMachine = {\n"
-               "    if (~wfPauseMachine.notNil) { ~wfPauseMachine.() };\n"
-               "    ~wfObjects.keys.copy.do { |key| ~wfStop.(key, 0.025) };\n"
-               "    ~wfPrograms = IdentityDictionary.new;\n"
-               "    ~wfFrozenPaths = IdentityDictionary.new;\n"
-               "    ~wfVolumes = IdentityDictionary.new;\n"
-               "    ~wfPans = IdentityDictionary.new;\n"
-               "    ~wfConfiguredMachine = nil;\n"
-               "    ~wfMachineTokens.keysValuesDo { |key, token| ~wfMachineTokens[key] = token + 1 };\n"
-               "    \"WF_PROJECT_CLEARED\".postln;\n"
+               "~ofClearMachine = {\n"
+               "    if (~ofPauseMachine.notNil) { ~ofPauseMachine.() };\n"
+               "    ~ofObjects.keys.copy.do { |key| ~ofStop.(key, 0.025) };\n"
+               "    ~ofPrograms = IdentityDictionary.new;\n"
+               "    ~ofProgramUsesLaneBus = IdentityDictionary.new;\n"
+               "    ~ofFrozenPaths = IdentityDictionary.new;\n"
+               "    ~ofVolumes = IdentityDictionary.new;\n"
+               "    ~ofPans = IdentityDictionary.new;\n"
+               "    ~ofConfiguredMachine = nil;\n"
+               "    ~ofMachineTokens.keysValuesDo { |key, token| ~ofMachineTokens[key] = token + 1 };\n"
+               "    \"OF_PROJECT_CLEARED\".postln;\n"
                "};\n"
-               "~wfPanic = {\n"
+               "~ofPanic = {\n"
                "    s.freeAll;\n"
-               "    ~wfObjects = IdentityDictionary.new;\n"
-               "    ~wfStopTokens = IdentityDictionary.new;\n"
-               "    ~wfVolumes = IdentityDictionary.new;\n"
-               "    ~wfPans = IdentityDictionary.new;\n"
-               "    ~wfFrozenPaths = IdentityDictionary.new;\n"
-               "    ~wfFrozenBuffers = IdentityDictionary.new;\n"
-               "    ~wfFrozenBufferPaths = IdentityDictionary.new;\n"
-               "    ~wfLaneBuses = IdentityDictionary.new;\n"
-               "    ~wfLaneRouters = IdentityDictionary.new;\n"
-               "    ~wfMeterIds = IdentityDictionary.new;\n"
-               "    ~wfMeterKeys = IdentityDictionary.new;\n"
-               "    ~wfNextMeterId = 1;\n"
-               "    SystemClock.sched(0.05, { ~wfStartMaster.(); nil });\n"
+               "    ~ofObjects = IdentityDictionary.new;\n"
+               "    ~ofStopTokens = IdentityDictionary.new;\n"
+               "    ~ofVolumes = IdentityDictionary.new;\n"
+               "    ~ofPans = IdentityDictionary.new;\n"
+               "    ~ofFrozenPaths = IdentityDictionary.new;\n"
+               "    ~ofProgramUsesLaneBus = IdentityDictionary.new;\n"
+               "    ~ofFrozenBuffers = IdentityDictionary.new;\n"
+               "    ~ofFrozenBufferPaths = IdentityDictionary.new;\n"
+               "    ~ofLaneBuses = IdentityDictionary.new;\n"
+               "    ~ofLaneRouters = IdentityDictionary.new;\n"
+               "    ~ofMeterIds = IdentityDictionary.new;\n"
+               "    ~ofMeterKeys = IdentityDictionary.new;\n"
+               "    ~ofNextMeterId = 1;\n"
+               "    SystemClock.sched(0.05, { ~ofStartMaster.(); nil });\n"
                "};\n"
-               "~wfWhenReady.({ ~wfStartMaster.(); });\n"
-               "~wfPlayFrozen = { |key, path|\n"
-               "    var buf = ~wfFrozenBuffers[key];\n"
-               "    var oldPath = ~wfFrozenBufferPaths[key];\n"
-               "    var makeSynth = { |loaded|\n"
-               "        var synth = Synth(\\wfFrozenPlayer, [\\buf, loaded, \\gate, 1, \\fade, ~wfAttack, \\wfVol, ~wfVolumes[key] ? 1, \\wfPan, ~wfPans[key] ? 0, \\replyId, ~wfMeterIdFor.(key)]);\n"
-               "        ~wfObjects[key] = synth;\n"
+               "~ofWhenReady.({ ~ofStartMaster.(); });\n"
+               "~ofPlayFrozen = { |key, path|\n"
+               "    var buf = ~ofFrozenBuffers[key];\n"
+               "    var oldPath = ~ofFrozenBufferPaths[key];\n"
+               "    var token = (~ofStopTokens[key] ? 0) + 1;\n"
+               "    var makeSynth;\n"
+               "    ~ofStopTokens[key] = token;\n"
+               "    makeSynth = { |loaded|\n"
+               "        var synth = Synth(\\ofFrozenPlayer, [\\buf, loaded, \\gate, 1, \\fade, ~ofAttack, \\ofVol, ~ofVolumes[key] ? 1, \\ofPan, ~ofPans[key] ? 0, \\replyId, ~ofMeterIdFor.(key)]);\n"
+               "        ~ofObjects[key] = synth;\n"
+               "        (\"OF_PLAY_FROZEN \" ++ key ++ \" \" ++ path).postln;\n"
                "        synth;\n"
                "    };\n"
                "    if (buf.isNil or: { oldPath != path }) {\n"
                "        if (buf.notNil) { buf.free };\n"
-               "        ~wfFrozenBufferPaths[key] = path;\n"
+               "        ~ofFrozenBufferPaths[key] = path;\n"
                "        Buffer.read(s, path, action: { |loaded|\n"
-               "            ~wfFrozenBuffers[key] = loaded;\n"
-               "            makeSynth.(loaded);\n"
+               "            ~ofFrozenBuffers[key] = loaded;\n"
+               "            if (~ofStopTokens[key] == token) { makeSynth.(loaded) } { loaded.free };\n"
                "        });\n"
                "        nil;\n"
                "    } {\n"
-               "        makeSynth.(buf);\n"
+               "        if (~ofStopTokens[key] == token) { makeSynth.(buf) };\n"
                "    };\n"
                "};\n"
-               "~wfPlay = { |key|\n"
-               "    ~wfWhenReady.({\n"
-               "        var obj = ~wfObjects[key];\n"
-               "        var program = ~wfPrograms[key];\n"
-               "        var frozenPath = ~wfFrozenPaths[key];\n"
-               "        if (obj.notNil) {\n"
-               "            ~wfStopTokens.removeAt(key);\n"
-               "            if (obj.respondsTo(\\set)) { obj.set(\\gate, 1, \\fade, ~wfAttack, \\wfVol, ~wfVolumes[key] ? 1, \\wfPan, ~wfPans[key] ? 0) };\n"
+               "~ofPlay = { |key|\n"
+               "    ~ofWhenReady.({\n"
+               "        var obj = ~ofObjects[key];\n"
+               "        var program = ~ofPrograms[key];\n"
+               "        var frozenPath = ~ofFrozenPaths[key];\n"
+               "        if (frozenPath.notNil) {\n"
+               "            if (obj.notNil) { ~ofStop.(key, 0.01) };\n"
+               "            ~ofStopTokens.removeAt(key);\n"
+               "            obj = ~ofPlayFrozen.(key, frozenPath);\n"
+               "            if (obj.notNil) { ~ofObjects[key] = obj };\n"
+               "        } { if (obj.notNil) {\n"
+               "            ~ofStopTokens.removeAt(key);\n"
+               "            if (obj.respondsTo(\\set)) { obj.set(\\gate, 1, \\fade, ~ofAttack, \\ofVol, ~ofVolumes[key] ? 1, \\ofPan, ~ofPans[key] ? 0) };\n"
                "        } {\n"
-               "            if (frozenPath.notNil) {\n"
-               "                ~wfStopTokens.removeAt(key);\n"
-               "                obj = ~wfPlayFrozen.(key, frozenPath);\n"
-               "                if (obj.notNil) { ~wfObjects[key] = obj };\n"
-               "            } { if (program.notNil) {\n"
-               "                ~wfStopTokens.removeAt(key);\n"
-               "                obj = program.value;\n"
-               "                ~wfObjects[key] = obj;\n"
-               "            } };\n"
-               "        };\n"
+               "            if (program.notNil) {\n"
+               "                ~ofStopTokens.removeAt(key);\n"
+               "                Routine({\n"
+               "                    obj = program.value;\n"
+               "                    ~ofObjects[key] = obj;\n"
+               "                }).play(SystemClock);\n"
+               "            };\n"
+               "        } };\n"
                "    });\n"
                "};\n"
-               "~wfFreeze = { |key, path, duration = 4|\n"
-               "    ~wfWhenReady.({\n"
+               "~ofFreeze = { |key, path, duration = 4|\n"
+               "    ~ofWhenReady.({\n"
                "        Routine({\n"
-               "            var program = ~wfPrograms[key];\n"
+               "            var program = ~ofPrograms[key];\n"
                "            var obj, recBuf, recSynth;\n"
                "            duration = duration.clip(0.25, 64);\n"
-               "            if (program.isNil) { (\"WF_FREEZE_ERROR \" ++ key ++ \" no program\").warn; ^nil };\n"
-               "            ~wfStop.(key, 0.02);\n"
+               "            if (program.isNil) { (\"OF_FREEZE_ERROR \" ++ key ++ \" no program\").warn; ^nil };\n"
+               "            ~ofStop.(key, 0.02);\n"
                "            recBuf = Buffer.alloc(s, (s.sampleRate * duration).asInteger.max(1024), 2);\n"
                "            s.sync;\n"
-               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, ~wfLaneBusFor.(key)]);\n"
+               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, if (~ofProgramUsesLaneBus[key] == true, { ~ofLaneBusFor.(key) }, { 0 })]);\n"
                "            s.sync;\n"
                "            obj = program.value;\n"
-               "            ~wfObjects[key] = obj;\n"
+               "            ~ofObjects[key] = obj;\n"
                "            duration.wait;\n"
-               "            ~wfStop.(key, 0.05);\n"
+               "            ~ofStop.(key, 0.05);\n"
                "            s.sync;\n"
                "            recBuf.write(path, \"wav\", \"float\", -1, 0, false);\n"
                "            s.sync;\n"
                "            recBuf.free;\n"
-               "            ~wfFrozenPaths[key] = path;\n"
-               "            ~wfJuce.sendMsg('/wf/frozen', key.asString, path);\n"
-               "            (\"WF_FREEZE_DONE \" ++ key ++ \" \" ++ path).postln;\n"
+               "            if (~ofFrozenBuffers[key].notNil) { ~ofFrozenBuffers[key].free; ~ofFrozenBuffers.removeAt(key) };\n"
+               "            ~ofFrozenBufferPaths.removeAt(key);\n"
+               "            ~ofFrozenPaths[key] = path;\n"
+               "            ~ofJuce.sendMsg('/of/frozen', key.asString, path);\n"
+               "            (\"OF_FREEZE_DONE \" ++ key ++ \" \" ++ path).postln;\n"
                "        }).play(SystemClock);\n"
                "    });\n"
                "};\n"
-               "~wfExport = { |path, duration = 32, rate = 1, startState = 0, sampleFormat = \"int16\"|\n"
-               "    ~wfWhenReady.({\n"
+               "~ofExport = { |path, duration = 32, rate = 1, startState = 0, sampleFormat = \"int16\"|\n"
+               "    ~ofWhenReady.({\n"
                "        Routine({\n"
                "            var recBuf, recSynth, elapsed;\n"
-               "            if (~wfConfiguredMachine.isNil) {\n"
-               "                \"WF_EXPORT_ERROR no configured machine\".warn;\n"
-               "                ~wfJuce.sendMsg('/wf/exported', path, 0);\n"
+               "            if (~ofConfiguredMachine.isNil) {\n"
+               "                \"OF_EXPORT_ERROR no configured machine\".warn;\n"
+               "                ~ofJuce.sendMsg('/of/exported', path, 0);\n"
                "                ^nil;\n"
                "            };\n"
-               "            if (~wfExporting) {\n"
-               "                \"WF_EXPORT_ERROR already exporting\".warn;\n"
-               "                ~wfJuce.sendMsg('/wf/exported', path, 0);\n"
+               "            if (~ofExporting) {\n"
+               "                \"OF_EXPORT_ERROR already exporting\".warn;\n"
+               "                ~ofJuce.sendMsg('/of/exported', path, 0);\n"
                "                ^nil;\n"
                "            };\n"
                "            duration = duration.clip(1, 1800);\n"
                "            rate = rate.max(0.05);\n"
                "            sampleFormat = if ([\"int16\", \"int24\", \"float\"].includes(sampleFormat).not, { \"int16\" }, { sampleFormat });\n"
-               "            ~wfExportCancel = false;\n"
-               "            ~wfExporting = true;\n"
-               "            (\"WF_EXPORT_START \" ++ path ++ \" duration=\" ++ duration ++ \" format=\" ++ sampleFormat).postln;\n"
-               "            ~wfPauseMachine.();\n"
+               "            ~ofExportCancel = false;\n"
+               "            ~ofExporting = true;\n"
+               "            (\"OF_EXPORT_START \" ++ path ++ \" duration=\" ++ duration ++ \" format=\" ++ sampleFormat).postln;\n"
+               "            ~ofPauseMachine.();\n"
                "            recBuf = Buffer.alloc(s, 65536, 2);\n"
                "            s.sync;\n"
                "            recBuf.write(path, \"wav\", sampleFormat, 0, 0, true);\n"
                "            s.sync;\n"
                "            recSynth = { |buf| DiskOut.ar(buf, In.ar(0, 2)); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf]);\n"
                "            s.sync;\n"
-               "            ~wfRunMachine.(startState.asInteger, rate);\n"
+               "            ~ofRunMachine.(startState.asInteger, rate);\n"
                "            elapsed = 0.0;\n"
-               "            while { (elapsed < duration) and: { ~wfExportCancel.not } } {\n"
-               "                ~wfJuce.sendMsg('/wf/exportProgress', path, elapsed.min(duration), duration);\n"
+               "            while { (elapsed < duration) and: { ~ofExportCancel.not } } {\n"
+               "                ~ofJuce.sendMsg('/of/exportProgress', path, elapsed.min(duration), duration);\n"
                "                0.25.wait;\n"
                "                elapsed = elapsed + 0.25;\n"
                "            };\n"
-               "            if (~wfExportCancel.not) { ~wfJuce.sendMsg('/wf/exportProgress', path, duration, duration); };\n"
-               "            ~wfPauseMachine.();\n"
-               "            ~wfStopAll.();\n"
+               "            if (~ofExportCancel.not) { ~ofJuce.sendMsg('/of/exportProgress', path, duration, duration); };\n"
+               "            ~ofPauseMachine.();\n"
+               "            ~ofStopAll.();\n"
                "            s.sync;\n"
                "            if (recSynth.notNil) { recSynth.free };\n"
                "            s.sync;\n"
-               "            if (~wfExportCancel) {\n"
+               "            if (~ofExportCancel) {\n"
                "                recBuf.close;\n"
                "                s.sync;\n"
                "                recBuf.free;\n"
-               "                ~wfExporting = false;\n"
-               "                ~wfJuce.sendMsg('/wf/exported', path, -1);\n"
-               "                (\"WF_EXPORT_CANCELLED \" ++ path).postln;\n"
+               "                ~ofExporting = false;\n"
+               "                ~ofJuce.sendMsg('/of/exported', path, -1);\n"
+               "                (\"OF_EXPORT_CANCELLED \" ++ path).postln;\n"
                "                ^nil;\n"
                "            };\n"
                "            recBuf.close;\n"
                "            s.sync;\n"
                "            recBuf.free;\n"
-               "            ~wfExporting = false;\n"
-               "            ~wfJuce.sendMsg('/wf/exported', path, 1);\n"
-               "            (\"WF_EXPORT_DONE \" ++ path).postln;\n"
+               "            ~ofExporting = false;\n"
+               "            ~ofJuce.sendMsg('/of/exported', path, 1);\n"
+               "            (\"OF_EXPORT_DONE \" ++ path).postln;\n"
                "        }).play(SystemClock);\n"
                "    });\n"
                "};\n"
-               "~wfCancelExport = { ~wfExportCancel = true; };\n"
-               "~wfTransition = { |stopKeys, playKeys, release, delay = 0|\n"
-               "    ~wfWhenReady.({\n"
+               "~ofCancelExport = { ~ofExportCancel = true; };\n"
+               "~ofTransition = { |stopKeys, playKeys, release, delay = 0|\n"
+               "    ~ofWhenReady.({\n"
                "        var requestedAt = Main.elapsedTime;\n"
                "        var action;\n"
-               "        (\"WF_TRANSITION_REQUEST delayMs=\" ++ (delay.max(0) * 1000).round(0.001) ++ \" stop=\" ++ stopKeys.size ++ \" play=\" ++ playKeys.size).postln;\n"
+               "        (\"OF_TRANSITION_REQUEST delayMs=\" ++ (delay.max(0) * 1000).round(0.001) ++ \" stop=\" ++ stopKeys.size ++ \" play=\" ++ playKeys.size).postln;\n"
                "        action = {\n"
-               "            (\"WF_TRANSITION_EXEC actualMs=\" ++ ((Main.elapsedTime - requestedAt) * 1000).round(0.001)).postln;\n"
+               "            (\"OF_TRANSITION_EXEC actualMs=\" ++ ((Main.elapsedTime - requestedAt) * 1000).round(0.001)).postln;\n"
                "            s.bind {\n"
-               "                stopKeys.do { |key| if (playKeys.includes(key).not) { ~wfStop.(key, release) } };\n"
-               "                playKeys.do { |key| ~wfPlay.(key) };\n"
+               "                stopKeys.do { |key| if (playKeys.includes(key).not) { ~ofStop.(key, release) } };\n"
+               "                playKeys.do { |key| ~ofPlay.(key) };\n"
                "            };\n"
                "        };\n"
                "        if (delay <= 0) { action.value } { SystemClock.sched(delay.max(0), { action.value; nil }) };\n"
                "    });\n"
                "};\n"
-               "~wfSetMachineTiming = { |machine|\n"
+               "~ofSetMachineTiming = { |machine|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
                "    var bpm = (state[\\bpm] ? 104).clip(20, 320);\n"
-               "    ~wfTempoHz = bpm / 60;\n"
-               "    ~markovTempoHz = ~wfTempoHz;\n"
-               "    ~wfMachineClock.tempo = ~wfTempoHz.max(0.05);\n"
-               "    (\"WF_TIMING bpm=\" ++ bpm.round(0.001) ++ \" rate=\" ++ (~wfRate ? 1.0).round(0.001) ++ \" hz=\" ++ ~wfTempoHz.round(0.001)).postln;\n"
+               "    ~ofTempoHz = bpm / 60;\n"
+               "    ~markovTempoHz = ~ofTempoHz;\n"
+               "    ~ofMachineClock.tempo = ~ofTempoHz.max(0.05);\n"
+               "    (\"OF_TIMING bpm=\" ++ bpm.round(0.001) ++ \" rate=\" ++ (~ofRate ? 1.0).round(0.001) ++ \" hz=\" ++ ~ofTempoHz.round(0.001)).postln;\n"
                "    nil;\n"
                "};\n"
-               "~wfConfiguredMachine = nil;\n"
-               "~wfRootTask = nil;\n"
-               "~wfMachineTokens = IdentityDictionary.new;\n"
-               "~wfRate = 1.0;\n"
-               "~wfMachineClock = TempoClock.new(1.0);\n"
-               "~wfRulesForState = { |machine, index|\n"
+               "~ofConfiguredMachine = nil;\n"
+               "~ofRootTask = nil;\n"
+               "~ofMachineTokens = IdentityDictionary.new;\n"
+               "~ofRate = 1.0;\n"
+               "~ofMachineClock = TempoClock.new(1.0);\n"
+               "~ofRulesForState = { |machine, index|\n"
                "    var state = machine[\\states][index];\n"
                "    var rules = state[\\rules] ? [];\n"
                "    if (rules.isEmpty) { [[(index + 1) % machine[\\states].size, 1.0]] } { rules };\n"
                "};\n"
-               "~wfChooseNextState = { |machine|\n"
-               "    var rules = ~wfRulesForState.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
+               "~ofChooseNextState = { |machine|\n"
+               "    var rules = ~ofRulesForState.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
                "    var total = rules.inject(0.0, { |sum, rule| sum + rule[1].max(0) });\n"
                "    var pick;\n"
                "    var chosen = rules[0][0];\n"
@@ -1160,29 +1246,29 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    chosen;\n"
                "};\n"
-               "~wfStateLanes = { |machine, index| machine[\\states][index][\\lanes] ? [] };\n"
-               "~wfActiveMachineLanes = { |machine|\n"
-               "    var keys = ~wfStateLanes.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
+               "~ofStateLanes = { |machine, index| machine[\\states][index][\\lanes] ? [] };\n"
+               "~ofActiveMachineLanes = { |machine|\n"
+               "    var keys = ~ofStateLanes.(machine, machine[\\selected] ? machine[\\entry] ? 0);\n"
                "    machine[\\states].do { |state|\n"
-               "        if (state[\\child].notNil) { keys = keys ++ ~wfActiveMachineLanes.(state[\\child]) };\n"
+               "        if (state[\\child].notNil) { keys = keys ++ ~ofActiveMachineLanes.(state[\\child]) };\n"
                "    };\n"
                "    keys;\n"
                "};\n"
-               "~wfInvalidateMachineRecursive = { |machine|\n"
-               "    ~wfMachineTokens[machine[\\id]] = (~wfMachineTokens[machine[\\id]] ? 0) + 1;\n"
-               "    machine[\\states].do { |state| if (state[\\child].notNil) { ~wfInvalidateMachineRecursive.(state[\\child]) } };\n"
+               "~ofInvalidateMachineRecursive = { |machine|\n"
+               "    ~ofMachineTokens[machine[\\id]] = (~ofMachineTokens[machine[\\id]] ? 0) + 1;\n"
+               "    machine[\\states].do { |state| if (state[\\child].notNil) { ~ofInvalidateMachineRecursive.(state[\\child]) } };\n"
                "};\n"
-               "~wfStopMachineRecursive = { |machine|\n"
-               "    ~wfInvalidateMachineRecursive.(machine);\n"
-               "    ~wfActiveMachineLanes.(machine).do { |key| ~wfStop.(key, ~wfRelease) };\n"
+               "~ofStopMachineRecursive = { |machine|\n"
+               "    ~ofInvalidateMachineRecursive.(machine);\n"
+               "    ~ofActiveMachineLanes.(machine).do { |key| ~ofStop.(key, ~ofRelease) };\n"
                "};\n"
-               "~wfArmChildMachine = { |machine|\n"
+               "~ofArmChildMachine = { |machine|\n"
                "    machine[\\selected] = machine[\\entry] ? 0;\n"
-               "    (\"WF_STATE \" ++ machine[\\id] ++ \" \" ++ machine[\\selected]).postln;\n"
-               "    ~wfJuce.sendMsg('/wf/state', machine[\\id], machine[\\selected]);\n"
-               "    ~wfStateLanes.(machine, machine[\\selected]);\n"
+               "    (\"OF_STATE \" ++ machine[\\id] ++ \" \" ++ machine[\\selected]).postln;\n"
+               "    ~ofJuce.sendMsg('/of/state', machine[\\id], machine[\\selected]);\n"
+               "    ~ofStateLanes.(machine, machine[\\selected]);\n"
                "};\n"
-               "~wfEnterMachineState = { |machine, next, force = false|\n"
+               "~ofEnterMachineState = { |machine, next, force = false|\n"
                "    var previous = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var changing = previous != next;\n"
                "    var stopKeys = [];\n"
@@ -1191,75 +1277,75 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var nextChild;\n"
                "    if (changing.not and: { force.not }) { ^nil };\n"
                "    if (changing) {\n"
-               "        stopKeys = stopKeys ++ ~wfStateLanes.(machine, previous);\n"
+               "        stopKeys = stopKeys ++ ~ofStateLanes.(machine, previous);\n"
                "        previousChild = machine[\\states][previous][\\child];\n"
                "        if (previousChild.notNil and: { previousChild[\\timing] != \\latch }) {\n"
-               "            stopKeys = stopKeys ++ ~wfActiveMachineLanes.(previousChild);\n"
-               "            ~wfInvalidateMachineRecursive.(previousChild);\n"
+               "            stopKeys = stopKeys ++ ~ofActiveMachineLanes.(previousChild);\n"
+               "            ~ofInvalidateMachineRecursive.(previousChild);\n"
                "        };\n"
                "    };\n"
                "    machine[\\selected] = next;\n"
-               "    ~wfSetMachineTiming.(machine);\n"
-               "    (\"WF_STATE \" ++ machine[\\id] ++ \" \" ++ next).postln;\n"
-               "    ~wfJuce.sendMsg('/wf/state', machine[\\id], next);\n"
-               "    playKeys = ~wfStateLanes.(machine, next);\n"
+               "    ~ofSetMachineTiming.(machine);\n"
+               "    (\"OF_STATE \" ++ machine[\\id] ++ \" \" ++ next).postln;\n"
+               "    ~ofJuce.sendMsg('/of/state', machine[\\id], next);\n"
+               "    playKeys = ~ofStateLanes.(machine, next);\n"
                "    nextChild = machine[\\states][next][\\child];\n"
-               "    if (nextChild.notNil) { playKeys = playKeys ++ ~wfArmChildMachine.(nextChild) };\n"
-               "    ~wfTransition.(stopKeys, playKeys, ~wfRelease, 0);\n"
+               "    if (nextChild.notNil) { playKeys = playKeys ++ ~ofArmChildMachine.(nextChild) };\n"
+               "    ~ofTransition.(stopKeys, playKeys, ~ofRelease, 0);\n"
                "    nil;\n"
                "};\n"
-               "~wfAdvanceMachine = { |machine|\n"
-               "    var next = ~wfChooseNextState.(machine);\n"
-               "    ~wfEnterMachineState.(machine, next, false);\n"
+               "~ofAdvanceMachine = { |machine|\n"
+               "    var next = ~ofChooseNextState.(machine);\n"
+               "    ~ofEnterMachineState.(machine, next, false);\n"
                "    nil;\n"
                "};\n"
-               "~wfMachineDuration = { |machine|\n"
+               "~ofMachineDuration = { |machine|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
-               "    ((state[\\clockBeats] ? 4) / (~wfRate ? 1.0).max(0.05)).max(0.25);\n"
+               "    ((state[\\clockBeats] ? 4) / (~ofRate ? 1.0).max(0.05)).max(0.25);\n"
                "};\n"
-               "~wfSendPulse = { |machine, beatIndex = 0, beatCount = 1|\n"
+               "~ofSendPulse = { |machine, beatIndex = 0, beatCount = 1|\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var count = beatCount.max(1).asInteger;\n"
                "    var beat = beatIndex.clip(0, count - 1).asInteger;\n"
                "    var phase = beat / count;\n"
-               "    ~wfJuce.sendMsg('/wf/pulse', machine[\\id], selected, phase, beat, count);\n"
+               "    ~ofJuce.sendMsg('/of/pulse', machine[\\id], selected, phase, beat, count);\n"
                "};\n"
-               "~wfSchedulePulses = { |machine, token|\n"
-               "    var duration = ~wfMachineDuration.(machine);\n"
+               "~ofSchedulePulses = { |machine, token|\n"
+               "    var duration = ~ofMachineDuration.(machine);\n"
                "    var selected = machine[\\selected] ? machine[\\entry] ? 0;\n"
                "    var state = machine[\\states][selected];\n"
                "    var beatCount = (state[\\clockBeats] ? 4).ceil.asInteger.max(1).min(32);\n"
                "    var interval = (duration / beatCount).max(0.05);\n"
-               "    ~wfSendPulse.(machine, 0, beatCount);\n"
+               "    ~ofSendPulse.(machine, 0, beatCount);\n"
                "    beatCount.do { |beat|\n"
                "        if (beat > 0) {\n"
-               "            ~wfMachineClock.sched(interval * beat, {\n"
-               "                if (~wfMachineTokens[machine[\\id]] == token) { ~wfSendPulse.(machine, beat, beatCount) };\n"
+               "            ~ofMachineClock.sched(interval * beat, {\n"
+               "                if (~ofMachineTokens[machine[\\id]] == token) { ~ofSendPulse.(machine, beat, beatCount) };\n"
                "                nil;\n"
                "            });\n"
                "        };\n"
                "    };\n"
                "};\n"
-               "~wfStartMachineTask = { |machine|\n"
-               "    var token = (~wfMachineTokens[machine[\\id]] ? 0) + 1;\n"
+               "~ofStartMachineTask = { |machine|\n"
+               "    var token = (~ofMachineTokens[machine[\\id]] ? 0) + 1;\n"
                "    var scheduleNext;\n"
-               "    ~wfMachineTokens[machine[\\id]] = token;\n"
+               "    ~ofMachineTokens[machine[\\id]] = token;\n"
                "    scheduleNext = {\n"
                "        var duration;\n"
                "        var durationSeconds;\n"
                "        var from;\n"
                "        var next;\n"
-               "        ~wfSetMachineTiming.(machine);\n"
-               "        ~wfSchedulePulses.(machine, token);\n"
-               "        duration = ~wfMachineDuration.(machine);\n"
-               "        durationSeconds = duration / (~wfMachineClock.tempo ? 1.0).max(0.05);\n"
+               "        ~ofSetMachineTiming.(machine);\n"
+               "        ~ofSchedulePulses.(machine, token);\n"
+               "        duration = ~ofMachineDuration.(machine);\n"
+               "        durationSeconds = duration / (~ofMachineClock.tempo ? 1.0).max(0.05);\n"
                "        from = machine[\\selected] ? machine[\\entry] ? 0;\n"
-               "        next = ~wfChooseNextState.(machine);\n"
-               "        ~wfJuce.sendMsg('/wf/scheduled', machine[\\id], from, next, durationSeconds);\n"
-               "        ~wfMachineClock.sched(duration, {\n"
-               "            if (~wfMachineTokens[machine[\\id]] == token) {\n"
-               "                ~wfEnterMachineState.(machine, next, false);\n"
+               "        next = ~ofChooseNextState.(machine);\n"
+               "        ~ofJuce.sendMsg('/of/scheduled', machine[\\id], from, next, durationSeconds);\n"
+               "        ~ofMachineClock.sched(duration, {\n"
+               "            if (~ofMachineTokens[machine[\\id]] == token) {\n"
+               "                ~ofEnterMachineState.(machine, next, false);\n"
                "                scheduleNext.value;\n"
                "            };\n"
                "            nil;\n"
@@ -1267,41 +1353,41 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    scheduleNext.value;\n"
                "};\n"
-               "~wfStartChildMachine = { |machine|\n"
-               "    ~wfArmChildMachine.(machine);\n"
+               "~ofStartChildMachine = { |machine|\n"
+               "    ~ofArmChildMachine.(machine);\n"
                "    // Child machines are pre-armed here; independent child clocks stay disabled until\n"
                "    // the top-level SC scheduler is fully stable.\n"
                "};\n"
-               "~wfConfigureMachine = { |machine|\n"
-               "    ~wfPauseMachine.();\n"
-               "    ~wfConfiguredMachine = machine;\n"
-               "    (\"WF_MACHINE_CONFIGURED states=\" ++ machine[\\states].size).postln;\n"
+               "~ofConfigureMachine = { |machine|\n"
+               "    ~ofPauseMachine.();\n"
+               "    ~ofConfiguredMachine = machine;\n"
+               "    (\"OF_MACHINE_CONFIGURED states=\" ++ machine[\\states].size).postln;\n"
                "};\n"
-               "~wfRunMachine = { |startState = 0, rate = 1|\n"
-               "    if (~wfConfiguredMachine.isNil) { \"WF_MACHINE_MISSING\".warn; ^nil };\n"
-               "    ~wfPauseMachine.();\n"
-               "    ~wfRate = rate.max(0.05);\n"
-               "    ~wfConfiguredMachine[\\entry] = startState.clip(0, ~wfConfiguredMachine[\\states].size - 1);\n"
-               "    ~wfConfiguredMachine[\\selected] = ~wfConfiguredMachine[\\entry];\n"
-               "    ~wfEnterMachineState.(~wfConfiguredMachine, ~wfConfiguredMachine[\\entry], true);\n"
-               "    ~wfStartMachineTask.(~wfConfiguredMachine);\n"
-               "    (\"WF_MACHINE_RUNNING rate=\" ++ ~wfRate).postln;\n"
+               "~ofRunMachine = { |startState = 0, rate = 1|\n"
+               "    if (~ofConfiguredMachine.isNil) { \"OF_MACHINE_MISSING\".warn; ^nil };\n"
+               "    ~ofPauseMachine.();\n"
+               "    ~ofRate = rate.max(0.05);\n"
+               "    ~ofConfiguredMachine[\\entry] = startState.clip(0, ~ofConfiguredMachine[\\states].size - 1);\n"
+               "    ~ofConfiguredMachine[\\selected] = ~ofConfiguredMachine[\\entry];\n"
+               "    ~ofEnterMachineState.(~ofConfiguredMachine, ~ofConfiguredMachine[\\entry], true);\n"
+               "    ~ofStartMachineTask.(~ofConfiguredMachine);\n"
+               "    (\"OF_MACHINE_RUNNING rate=\" ++ ~ofRate).postln;\n"
                "};\n"
-               "~wfPauseMachine = {\n"
-               "    ~wfMachineTokens.keysValuesDo { |key, token| ~wfMachineTokens[key] = token + 1 };\n"
-               "    if (~wfConfiguredMachine.notNil) { ~wfStopMachineRecursive.(~wfConfiguredMachine) };\n"
+               "~ofPauseMachine = {\n"
+               "    ~ofMachineTokens.keysValuesDo { |key, token| ~ofMachineTokens[key] = token + 1 };\n"
+               "    if (~ofConfiguredMachine.notNil) { ~ofStopMachineRecursive.(~ofConfiguredMachine) };\n"
                "};\n"
-               "~wfStepMachine = { if (~wfConfiguredMachine.notNil) { ~wfAdvanceMachine.(~wfConfiguredMachine) } };\n"
-               "OSCdef(\\wfLoad, { |msg| ~wfLoad.(msg[1].asString.asSymbol, msg[2].asString); }, '/wf/load');\n"
-               "OSCdef(\\wfLoadFrozen, { |msg| ~wfLoadFrozen.(msg[1].asString.asSymbol, msg[2].asString); }, '/wf/loadFrozen');\n"
-               "OSCdef(\\wfCheck, { |msg| ~wfCheck.(msg[1].asString, msg[2].asString, msg[3].asString); }, '/wf/check');\n"
-               "OSCdef(\\wfPlay, { |msg| ~wfPlay.(msg[1].asString.asSymbol); }, '/wf/play');\n"
-               "OSCdef(\\wfFreeze, { |msg| ~wfFreeze.(msg[1].asString.asSymbol, msg[2].asString, msg[3].asFloat); }, '/wf/freeze');\n"
-               "OSCdef(\\wfExport, { |msg| ~wfExport.(msg[1].asString, msg[2].asFloat, msg[3].asFloat, msg[4].asInteger, msg[5].asString); }, '/wf/export');\n"
-               "OSCdef(\\wfCancelExport, { ~wfCancelExport.(); }, '/wf/cancelExport');\n"
-               "OSCdef(\\wfRunMachine, { |msg| ~wfRunMachine.(msg[1].asInteger, msg[2].asFloat); }, '/wf/runMachine');\n"
-               "OSCdef(\\wfPauseMachine, { ~wfPauseMachine.(); }, '/wf/pauseMachine');\n"
-               "OSCdef(\\wfTransition, { |msg|\n"
+               "~ofStepMachine = { if (~ofConfiguredMachine.notNil) { ~ofAdvanceMachine.(~ofConfiguredMachine) } };\n"
+               "OSCdef(\\ofLoad, { |msg| ~ofLoad.(msg[1].asString.asSymbol, msg[2].asString); }, '/of/load');\n"
+               "OSCdef(\\ofLoadFrozen, { |msg| ~ofLoadFrozen.(msg[1].asString.asSymbol, msg[2].asString); }, '/of/loadFrozen');\n"
+               "OSCdef(\\ofCheck, { |msg| ~ofCheck.(msg[1].asString, msg[2].asString, msg[3].asString); }, '/of/check');\n"
+               "OSCdef(\\ofPlay, { |msg| ~ofPlay.(msg[1].asString.asSymbol); }, '/of/play');\n"
+               "OSCdef(\\ofFreeze, { |msg| ~ofFreeze.(msg[1].asString.asSymbol, msg[2].asString, msg[3].asFloat); }, '/of/freeze');\n"
+               "OSCdef(\\ofExport, { |msg| ~ofExport.(msg[1].asString, msg[2].asFloat, msg[3].asFloat, msg[4].asInteger, msg[5].asString); }, '/of/export');\n"
+               "OSCdef(\\ofCancelExport, { ~ofCancelExport.(); }, '/of/cancelExport');\n"
+               "OSCdef(\\ofRunMachine, { |msg| ~ofRunMachine.(msg[1].asInteger, msg[2].asFloat); }, '/of/runMachine');\n"
+               "OSCdef(\\ofPauseMachine, { ~ofPauseMachine.(); }, '/of/pauseMachine');\n"
+               "OSCdef(\\ofTransition, { |msg|\n"
                "    var release = msg[1].asFloat;\n"
                "    var delay = msg[2].asFloat;\n"
                "    var stopCount = msg[3].asInteger;\n"
@@ -1309,19 +1395,19 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    var playCount = msg[playOffset].asInteger;\n"
                "    var stops = Array.fill(stopCount, { |i| msg[4 + i].asString.asSymbol });\n"
                "    var plays = Array.fill(playCount, { |i| msg[playOffset + 1 + i].asString.asSymbol });\n"
-               "    ~wfTransition.(stops, plays, release, delay);\n"
-               "}, '/wf/transition');\n"
-               "OSCdef(\\wfVolume, { |msg| ~wfSetVolume.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/wf/volume');\n"
-               "OSCdef(\\wfMix, { |msg| ~wfSetMix.(msg[1].asString.asSymbol, msg[2].asFloat, msg[3].asFloat); }, '/wf/mix');\n"
-               "OSCdef(\\wfMasterGain, { |msg| ~wfSetMasterGain.(msg[1].asFloat); }, '/wf/masterGain');\n"
-               "OSCdef(\\wfStop, { |msg| ~wfStop.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/wf/stop');\n"
-               "OSCdef(\\wfStopAll, { ~wfStopAll.(); }, '/wf/stopAll');\n"
-               "OSCdef(\\wfClear, { ~wfClearMachine.(); }, '/wf/clear');\n"
-               "OSCdef(\\wfPanic, { ~wfPanic.(); }, '/wf/panic');\n"
-               "OSCdef(\\wfQuit, { ~wfPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil }); }, '/wf/quit');\n"
-               "~wfTest = { ~wfWhenReady.({ { SinOsc.ar(660 ! 2) * EnvGen.kr(Env.perc(0.01, 1.8), doneAction: 2) * 0.18 }.play; }); };\n"
-               "OSCdef(\\wfTest, { ~wfTest.(); }, '/wf/test');\n"
-               "~wfPollCommands = {\n"
+               "    ~ofTransition.(stops, plays, release, delay);\n"
+               "}, '/of/transition');\n"
+               "OSCdef(\\ofVolume, { |msg| ~ofSetVolume.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/of/volume');\n"
+               "OSCdef(\\ofMix, { |msg| ~ofSetMix.(msg[1].asString.asSymbol, msg[2].asFloat, msg[3].asFloat); }, '/of/mix');\n"
+               "OSCdef(\\ofMasterGain, { |msg| ~ofSetMasterGain.(msg[1].asFloat); }, '/of/masterGain');\n"
+               "OSCdef(\\ofStop, { |msg| ~ofStop.(msg[1].asString.asSymbol, msg[2].asFloat); }, '/of/stop');\n"
+               "OSCdef(\\ofStopAll, { ~ofStopAll.(); }, '/of/stopAll');\n"
+               "OSCdef(\\ofClear, { ~ofClearMachine.(); }, '/of/clear');\n"
+               "OSCdef(\\ofPanic, { ~ofPanic.(); }, '/of/panic');\n"
+               "OSCdef(\\ofQuit, { ~ofPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil }); }, '/of/quit');\n"
+               "~ofTest = { ~ofWhenReady.({ { SinOsc.ar(660 ! 2) * EnvGen.kr(Env.perc(0.01, 1.8), doneAction: 2) * 0.18 }.play; }); };\n"
+               "OSCdef(\\ofTest, { ~ofTest.(); }, '/of/test');\n"
+               "~ofPollCommands = {\n"
                "    var dir = PathName(" + commandPath + ");\n"
                "    dir.files.sort({ |a, b| a.fileName < b.fileName }).do { |file|\n"
                "        if (file.extension == \"scd\") {\n"
@@ -1334,26 +1420,26 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "    };\n"
                "    0.012;\n"
                "};\n"
-               "SystemClock.sched(0.012, ~wfPollCommands);\n"
+               "SystemClock.sched(0.012, ~ofPollCommands);\n"
                ")\n";
     }
 
 void SuperColliderHost::sendLoadCommand(const juce::String& laneId, const juce::String& scriptPath)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfLoad.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (scriptPath) + ");\n");
+            writeCommand ("~ofLoad.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (scriptPath) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/load", laneId, scriptPath);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/load", laneId, scriptPath);
     }
 
 void SuperColliderHost::sendLoadFrozenCommand (const juce::String& laneId, const juce::String& audioPath)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfLoadFrozen.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (audioPath) + ");\n");
+            writeCommand ("~ofLoadFrozen.(" + scSymbolLiteral (laneId) + ", " + scStringLiteral (audioPath) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/loadFrozen", laneId, audioPath);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/loadFrozen", laneId, audioPath);
     }
 
 void SuperColliderHost::sendFreezeCommand (const juce::String& laneId, const juce::String& audioPath, double durationSeconds)
@@ -1361,12 +1447,12 @@ void SuperColliderHost::sendFreezeCommand (const juce::String& laneId, const juc
         const auto duration = juce::jlimit (0.25, 64.0, durationSeconds);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfFreeze.(" + scSymbolLiteral (laneId) + ", "
+            writeCommand ("~ofFreeze.(" + scSymbolLiteral (laneId) + ", "
                           + scStringLiteral (audioPath) + ", "
                           + scFloatLiteral (duration) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/freeze", laneId, audioPath, static_cast<float> (duration));
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/freeze", laneId, audioPath, static_cast<float> (duration));
     }
 
 void SuperColliderHost::sendExportCommand (const juce::String& audioPath, double durationSeconds, double rate, int startState, const juce::String& sampleFormat)
@@ -1377,32 +1463,32 @@ void SuperColliderHost::sendExportCommand (const juce::String& audioPath, double
         const auto format = (sampleFormat == "int24" || sampleFormat == "float") ? sampleFormat : juce::String ("int16");
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfExport.(" + scStringLiteral (audioPath) + ", "
+            writeCommand ("~ofExport.(" + scStringLiteral (audioPath) + ", "
                           + scFloatLiteral (duration) + ", "
                           + scFloatLiteral (clippedRate) + ", "
                           + juce::String (clippedState) + ", "
                           + scStringLiteral (format) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/export", audioPath, static_cast<float> (duration), static_cast<float> (clippedRate), clippedState, format);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/export", audioPath, static_cast<float> (duration), static_cast<float> (clippedRate), clippedState, format);
     }
 
 void SuperColliderHost::sendCancelExportCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfCancelExport.();\n");
+            writeCommand ("~ofCancelExport.();\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/cancelExport");
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/cancelExport");
     }
 
 void SuperColliderHost::sendPlayCommand(const juce::String& laneId)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfPlay.(" + scSymbolLiteral (laneId) + ");\n");
+            writeCommand ("~ofPlay.(" + scSymbolLiteral (laneId) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/play", laneId);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/play", laneId);
     }
 
 void SuperColliderHost::sendTransitionCommand(const juce::StringArray& stopIds,
@@ -1416,14 +1502,14 @@ void SuperColliderHost::sendTransitionCommand(const juce::StringArray& stopIds,
                           + " delayMs=" + juce::String (clippedDelay * 1000.0, 2));
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfTransition.(" + scSymbolArrayLiteral (stopIds) + ", "
+            writeCommand ("~ofTransition.(" + scSymbolArrayLiteral (stopIds) + ", "
                           + scSymbolArrayLiteral (playIds) + ", "
                           + juce::String (releaseSeconds, 3) + ", "
                           + juce::String (clippedDelay, 4) + ");\n");
 
-        if (oscConnected)
+        if (shouldSendOscCommand())
         {
-            juce::OSCMessage message ("/wf/transition");
+            juce::OSCMessage message ("/of/transition");
             message.addFloat32 (static_cast<float> (releaseSeconds));
             message.addFloat32 (static_cast<float> (clippedDelay));
             message.addInt32 (stopIds.size());
@@ -1443,10 +1529,10 @@ void SuperColliderHost::sendVolumeCommand(const juce::String& laneId, float volu
         const auto clipped = juce::jlimit (0.0f, 1.0f, volume);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfSetVolume.(" + scSymbolLiteral (laneId) + ", " + juce::String (clipped, 3) + ");\n");
+            writeCommand ("~ofSetVolume.(" + scSymbolLiteral (laneId) + ", " + juce::String (clipped, 3) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/volume", laneId, clipped);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/volume", laneId, clipped);
     }
 
 void SuperColliderHost::sendMixCommand (const juce::String& laneId, float volume, float pan)
@@ -1455,12 +1541,12 @@ void SuperColliderHost::sendMixCommand (const juce::String& laneId, float volume
         const auto clippedPan = juce::jlimit (-1.0f, 1.0f, pan);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfSetMix.(" + scSymbolLiteral (laneId) + ", "
+            writeCommand ("~ofSetMix.(" + scSymbolLiteral (laneId) + ", "
                           + juce::String (clippedVolume, 3) + ", "
                           + juce::String (clippedPan, 3) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/mix", laneId, clippedVolume, clippedPan);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/mix", laneId, clippedVolume, clippedPan);
     }
 
 void SuperColliderHost::setMasterGain (float gain)
@@ -1475,42 +1561,47 @@ void SuperColliderHost::sendMasterGainCommand (float gain)
         const auto clippedGain = juce::jlimit (0.0f, 5.0f, gain);
 
         if (shouldUseCommandFallback())
-            writeCommand ("~wfSetMasterGain.(" + juce::String (clippedGain, 3) + ");\n");
+            writeCommand ("~ofSetMasterGain.(" + juce::String (clippedGain, 3) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/masterGain", clippedGain);
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/masterGain", clippedGain);
     }
 
 void SuperColliderHost::sendStopCommand(const juce::String& laneId, double releaseSeconds)
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfStop.(" + scSymbolLiteral (laneId) + ", " + juce::String (releaseSeconds, 3) + ");\n");
+            writeCommand ("~ofStop.(" + scSymbolLiteral (laneId) + ", " + juce::String (releaseSeconds, 3) + ");\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/stop", laneId, static_cast<float> (releaseSeconds));
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/stop", laneId, static_cast<float> (releaseSeconds));
     }
 
 void SuperColliderHost::sendStopAllCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfStopAll.();\n");
+            writeCommand ("~ofStopAll.();\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/stopAll");
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/stopAll");
     }
 
 void SuperColliderHost::sendClearMachineCommand()
     {
         if (shouldUseCommandFallback())
-            writeCommand ("~wfClearMachine.();\n");
+            writeCommand ("~ofClearMachine.();\n");
 
-        if (oscConnected)
-            oscSender.send ("/wf/clear");
+        if (shouldSendOscCommand())
+            oscSender.send ("/of/clear");
     }
 
 bool SuperColliderHost::shouldUseCommandFallback() const
     {
         return ! oscConnected || juce::Time::currentTimeMillis() - bridgeStartedAtMs < 1800;
+    }
+
+bool SuperColliderHost::shouldSendOscCommand() const
+    {
+        return oscConnected && ! shouldUseCommandFallback();
     }
 
 void SuperColliderHost::writeCommand(const juce::String& command)
@@ -1540,13 +1631,13 @@ void SuperColliderHost::shutdown()
         {
             if (oscConnected)
             {
-                oscSender.send ("/wf/panic");
-                oscSender.send ("/wf/quit");
+                oscSender.send ("/of/panic");
+                oscSender.send ("/of/quit");
                 oscSender.disconnect();
                 oscConnected = false;
             }
 
-            writeCommand ("~wfPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil });\n");
+            writeCommand ("~ofPanic.(); s.quit; SystemClock.sched(0.18, { 0.exit; nil });\n");
             juce::Thread::sleep (260);
 
             if (bridgeProcess->isRunning())
@@ -1663,7 +1754,7 @@ juce::String SuperColliderHost::checkScript (const juce::String& script, const j
         resultDir.createDirectory();
         auto resultFile = resultDir.getChildFile (checkId + ".txt");
         resultFile.deleteFile();
-        writeCommand ("~wfCheck.(" + scStringLiteral (checkId) + ", "
+        writeCommand ("~ofCheck.(" + scStringLiteral (checkId) + ", "
                     + scStringLiteral (scriptFile.getFullPathName()) + ", "
                     + scStringLiteral (resultFile.getFullPathName()) + ");\n");
         appendRuntimeLog ("check requested: " + checkId);
