@@ -1,6 +1,6 @@
 # of::
 
-A JUCE/C++ desktop app for performing with a finite-state machine whose states host live SuperCollider lanes.
+A JUCE/C++ desktop app for performing orbital audio structures: states contain tracks, and tracks contain SuperCollider lanes.
 
 ## Requires SuperCollider
 
@@ -31,19 +31,19 @@ build/of_artefacts/Debug/of.app
 
 ## SuperCollider
 
-Each state can contain one or more lanes. A lane is a live `.scd` script buffer. Use `Play` to run the selected lane, or `Run` / `Step` to play all lanes in the active state while the FSM advances through weighted transition rules.
+Each state can contain one or more circular tracks. Each track contains one or more lanes, and each lane can hold a live or rendered `.scd` script. Use `Audition` to run the selected lane, or `Run` / `Step` to play the active state's tracks according to the Fabric state program.
 
 For copyable lane ideas, see the [SuperCollider lane catalogue](docs/supercollider-lane-catalogue.md).
 
-For tighter standalone audio-app behavior, the app keeps one persistent `sclang` bridge alive, boots the SuperCollider server once, and preloads lane programs. This avoids spawning a new language process for every lane, while the JUCE transport keeps parent and nested FSM state changes deterministic.
+For tighter standalone audio-app behavior, the app keeps one persistent `sclang` bridge alive, boots the SuperCollider server once, and preloads lane programs. This avoids spawning a new language process for every lane, while the JUCE transport keeps state, track, and child-track changes deterministic.
 
-Use `Boot audio` before performing to start the bridge and preload every lane program without playing anything. When `Run` starts, the app also preloads all lanes before the first transition.
+Use `Render all` before performing when you want JUCE to play rendered lane audio. When `Run` starts in rendered mode, stale or missing lanes are blocked until they have usable audio.
 
 JUCE sends setup, play/stop, and emergency commands over OSC to the persistent language process on `127.0.0.1:57143`, with an ordered file-backed command path as startup insurance. Hidden code-level latency profiles control SC scheduling and buffer size without adding UI.
 
-Lane objects are kept warm where possible: synth-like lane objects are gated/paused instead of recreated on every state change. A hidden crossfade value smooths state changes without adding a visible control.
+Lane objects are kept warm where possible: synth-like lane objects are gated/paused instead of recreated on every state change. A hidden crossfade value smooths state and track changes without adding a visible control.
 
-States can contain nested finite-state machines. Select a state and use `+ FSM` to create a child machine, `Enter` to edit it, and `Back` to return to the parent. When the parent enters that state, the child machine runs inside it; the parent holds until the child returns to its entry state, then the parent is allowed to advance. Leaving the state stops the child and gates its lanes.
+Tracks can contain child tracks. Select a track and use `+ Child` to create a child-track set; the child timing controls decide whether it follows, free-runs, latches, or plays once. Leaving the parent track stops the child tracks and gates their lanes.
 
 The header shows a compact audio status. `Log` opens a hidden drawer with captured `sclang` output for debugging scripts. `Panic` stops all active lane objects and sends `s.freeAll` to SuperCollider without cluttering the normal performance surface.
 

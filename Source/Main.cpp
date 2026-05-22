@@ -1667,7 +1667,7 @@ public:
         addButton.setButtonText ("Add");
         updateButton.setButtonText ("Save");
         removeButton.setButtonText ("Delete");
-        ringButton.setButtonText ("Rules");
+        ringButton.setButtonText ("Flow");
 
         addButton.onClick = [this]
         {
@@ -1748,7 +1748,7 @@ public:
         g.fillAll (panelFill());
         g.setColour (ink());
         g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-        g.drawText ("Transition rules", getLocalBounds().removeFromTop (28), juce::Justification::centredLeft);
+        g.drawText ("Track flow rules", getLocalBounds().removeFromTop (28), juce::Justification::centredLeft);
 
         auto list = getRuleListBounds();
         g.setFont (juce::FontOptions (12.5f));
@@ -2184,7 +2184,7 @@ public:
             g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
             titleArea.removeFromRight (170);
             auto hintArea = titleArea.removeFromRight (150);
-            g.drawFittedText (hoverHint.isNotEmpty() ? hoverHint : "nested + lanes",
+            g.drawFittedText (hoverHint.isNotEmpty() ? hoverHint : "child tracks + lanes",
                               hintArea, juce::Justification::centredRight, 1);
         }
 
@@ -2497,9 +2497,9 @@ private:
                               juce::Justification::centredLeft, 1);
         };
 
-        drawLabel ("Top", topRow);
+        drawLabel ("Tracks", topRow);
         drawLabel ("Flow", flowRow);
-        drawLabel ("Nested", nestedRow);
+        drawLabel ("Child", nestedRow);
         drawLabel ("Lanes", lanesRow);
     }
 
@@ -2576,7 +2576,7 @@ private:
 
         const auto& state = machine->state (hit.stateIndex);
         if (hit.kind == Hit::nestedState)
-            return "Select nested track " + juce::String (hit.detailIndex + 1) + " in " + trackDisplayName (state);
+            return "Select child track " + juce::String (hit.detailIndex + 1) + " in " + trackDisplayName (state);
         if (hit.kind == Hit::lane)
         {
             if (hit.detailIndex >= 0 && hit.detailIndex < static_cast<int> (state.lanes.size()))
@@ -5023,7 +5023,7 @@ private:
             const auto laneCount = static_cast<int> (state.lanes.size());
             auto detail = juce::String (laneCount) + (laneCount == 1 ? " lane" : " lanes");
             if (model.hasChildMachine (i))
-                detail = juce::String (model.childMachine (i)->getStateCount()) + " nested tracks";
+                detail = juce::String (model.childMachine (i)->getStateCount()) + " child tracks";
 
             rows.push_back ({ &model, i, depth, trackDisplayName (state), detail, area.removeFromTop (rowHeight) });
 
@@ -7144,7 +7144,7 @@ public:
         freezeStatusLabel.setJustificationType (juce::Justification::centredLeft);
 
         stateInfoTitle.setText ("Track", juce::dontSendNotification);
-        nestedSectionTitle.setText ("Nested tracks", juce::dontSendNotification);
+        nestedSectionTitle.setText ("Child tracks", juce::dontSendNotification);
         trackSectionTitle.setText ("Lanes", juce::dontSendNotification);
         for (auto* sectionTitle : { &stateInfoTitle, &nestedSectionTitle, &trackSectionTitle })
         {
@@ -7198,7 +7198,7 @@ public:
         stateDurationSecondsEditor.onReturnKey = [this] { commitStateTimingEditors(); };
         stateDurationSecondsEditor.onFocusLost = [this] { commitStateTimingEditors(); };
 
-        nestedTimingLabel.setText ("Nested timing", juce::dontSendNotification);
+        nestedTimingLabel.setText ("Child timing", juce::dontSendNotification);
         nestedTimingLabel.setFont (juce::FontOptions (12.5f, juce::Font::bold));
         nestedTimingLabel.setColour (juce::Label::textColourId, mutedInk());
 
@@ -7785,8 +7785,8 @@ public:
         resetShapeButton.setButtonText ("Reset shape");
         moveLaneUpButton.setButtonText ("^");
         moveLaneDownButton.setButtonText ("v");
-        addChildMachineButton.setButtonText ("+ Tracks");
-        removeChildMachineButton.setButtonText ("- Tracks");
+        addChildMachineButton.setButtonText ("+ Child");
+        removeChildMachineButton.setButtonText ("- Child");
         playButton.setButtonText ("Play");
 
         addLaneButton.onClick = [this]
@@ -11065,7 +11065,7 @@ private:
         {
             if (auto* child = model->childMachine (i))
             {
-                parts.add (trackDisplayName (model->state (i)) + " nested tracks");
+                parts.add (trackDisplayName (model->state (i)) + " child tracks");
                 if (addBreadcrumbParts (child, target, parts))
                     return true;
                 parts.remove (parts.size() - 1);
@@ -11081,7 +11081,7 @@ private:
         const auto& s = inspected.state (inspected.selectedState);
         const auto laneCount = static_cast<int> (s.lanes.size());
         auto activeText = (&inspected == activeMachine) ? "active" : "inspecting";
-        const auto nestedText = inspected.hasChildMachine (inspected.selectedState) ? "nested tracks" : "no nested tracks";
+        const auto nestedText = inspected.hasChildMachine (inspected.selectedState) ? "child tracks" : "no child tracks";
         const auto durationText = s.durationUsesSeconds
             ? juce::String (s.durationSeconds, 1) + " sec"
             : juce::String (s.arrangementBars) + "b " + juce::String (s.arrangementBeats) + "bt";
@@ -13890,9 +13890,9 @@ private:
             renderAllCurrentLaneStartedMs = juce::Time::getMillisecondCounterHiRes();
             ++renderAllRenderedLaneCount;
             setRenderJobState (targetIndex, RenderJobState::rendering, "rendering");
-            statusLabel.setText ("Rendering State " + juce::String (target.projectStateIndex + 1)
-                                 + " lane " + juce::String (renderAllRenderedLaneCount)
-                                 + " of " + juce::String (static_cast<int> (renderAllLaneQueue.size())),
+            statusLabel.setText ("Rendering " + renderTargetLabel (target)
+                                 + "  |  " + juce::String (renderAllRenderedLaneCount)
+                                 + "/" + juce::String (static_cast<int> (renderAllLaneQueue.size())),
                                  juce::dontSendNotification);
             orbitCanvas.invalidateWaveforms();
             refreshControls();
@@ -14683,7 +14683,7 @@ class OfApplication final : public juce::JUCEApplication,
 {
 public:
     const juce::String getApplicationName() override { return "of::"; }
-    const juce::String getApplicationVersion() override { return "0.1.2"; }
+    const juce::String getApplicationVersion() override { return "0.1.3"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise (const juce::String&) override
