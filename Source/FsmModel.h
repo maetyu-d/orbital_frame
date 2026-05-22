@@ -163,7 +163,7 @@ public:
     {
         setStateCount (5);
         regenerateRingRules();
-        if (machineId == "root" && lanePrefix.isEmpty())
+        if (machineId == "root")
         {
             if (loadRootDemo)
                 configureRootDemo();

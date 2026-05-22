@@ -367,6 +367,15 @@ public:
                 voice.active = false;
     }
 
+    void clearCacheForPath (const juce::String& path)
+    {
+        if (path.isEmpty())
+            return;
+
+        const juce::ScopedLock lock (audioLock);
+        cache.erase (path.toStdString());
+    }
+
     bool scheduleLane (const Lane& lane, double delaySeconds, float gain, double maxDurationSeconds, bool reverse = false, double sourceOffsetSeconds = 0.0)
     {
         auto file = loadFile (lane.frozenAudioPath);
@@ -1894,16 +1903,32 @@ public:
             button->setClickingTogglesState (false);
             button->onClick = [this, i]
             {
+                if (! interactionEnabled)
+                    return;
+
                 selectedIndex = i;
                 if (onIndexSelected)
                     onIndexSelected (i);
                 repaint();
             };
+            button->setEnabled (interactionEnabled);
             addAndMakeVisible (*button);
             buttons.push_back (std::move (button));
         }
 
         resized();
+        repaint();
+    }
+
+    void setInteractionEnabled (bool shouldEnable)
+    {
+        if (interactionEnabled == shouldEnable)
+            return;
+
+        interactionEnabled = shouldEnable;
+        for (auto& button : buttons)
+            if (button != nullptr)
+                button->setEnabled (interactionEnabled);
         repaint();
     }
 
@@ -1925,17 +1950,19 @@ public:
             auto cell = area.removeFromLeft (i == static_cast<int> (buttons.size()) - 1 ? area.getWidth() : width);
             const auto stateColour = graphColour (i);
             buttons[static_cast<size_t> (i)]->setBounds (cell.reduced (3, 1));
+            const auto disabledAlpha = interactionEnabled ? 1.0f : 0.42f;
             buttons[static_cast<size_t> (i)]->setColour (juce::TextButton::buttonColourId,
-                                                         i == selectedIndex ? rowFill().interpolatedWith (stateColour, 0.20f) : juce::Colour (0xff1a1f24).interpolatedWith (stateColour, 0.025f));
-            buttons[static_cast<size_t> (i)]->setColour (juce::TextButton::buttonOnColourId, rowFill().interpolatedWith (stateColour, 0.24f));
+                                                         (i == selectedIndex ? rowFill().interpolatedWith (stateColour, 0.20f) : juce::Colour (0xff1a1f24).interpolatedWith (stateColour, 0.025f)).withMultipliedAlpha (disabledAlpha));
+            buttons[static_cast<size_t> (i)]->setColour (juce::TextButton::buttonOnColourId, rowFill().interpolatedWith (stateColour, 0.24f).withMultipliedAlpha (disabledAlpha));
             buttons[static_cast<size_t> (i)]->setColour (juce::TextButton::textColourOffId,
-                                                         i == selectedIndex ? stateColour.brighter (0.14f) : mutedInk().withAlpha (0.78f));
+                                                         (i == selectedIndex ? stateColour.brighter (0.14f) : mutedInk().withAlpha (0.78f)).withMultipliedAlpha (disabledAlpha));
         }
     }
 
 private:
     std::vector<std::unique_ptr<juce::TextButton>> buttons;
     int selectedIndex = 0;
+    bool interactionEnabled = true;
 };
 
 class ArrangementStripComponent final : public juce::Component,
@@ -6824,9 +6851,7 @@ public:
         addAndMakeVisible (subtitle);
         addAndMakeVisible (newProjectButton);
         addAndMakeVisible (openProjectButton);
-        addAndMakeVisible (openDemoButton);
         addAndMakeVisible (settingsButton);
-        addAndMakeVisible (dismissButton);
         addAndMakeVisible (recentTitle);
 
         title.setText ("of::", juce::dontSendNotification);
@@ -6834,7 +6859,7 @@ public:
         title.setColour (juce::Label::textColourId, ink());
         title.setJustificationType (juce::Justification::centredLeft);
 
-        subtitle.setText ("Start a machine, open a project, or load a demo.", juce::dontSendNotification);
+        subtitle.setText ("Open a project or start with a blank one.", juce::dontSendNotification);
         subtitle.setFont (juce::FontOptions (13.5f));
         subtitle.setColour (juce::Label::textColourId, mutedInk());
         subtitle.setJustificationType (juce::Justification::centredLeft);
@@ -6844,17 +6869,13 @@ public:
         recentTitle.setColour (juce::Label::textColourId, mutedInk());
         recentTitle.setJustificationType (juce::Justification::centredLeft);
 
-        newProjectButton.setButtonText ("New Project");
+        newProjectButton.setButtonText ("New Blank Project");
         openProjectButton.setButtonText ("Open Project");
-        openDemoButton.setButtonText ("Open Demo");
         settingsButton.setButtonText ("Audio Settings");
-        dismissButton.setButtonText ("Close");
 
         newProjectButton.onClick = [this] { if (onNewProject) onNewProject(); };
         openProjectButton.onClick = [this] { if (onOpenProject) onOpenProject(); };
-        openDemoButton.onClick = [this] { if (onOpenDemo) onOpenDemo(); };
         settingsButton.onClick = [this] { if (onSettings) onSettings(); };
-        dismissButton.onClick = [this] { if (onDismiss) onDismiss(); };
 
         for (int i = 0; i < static_cast<int> (recentButtons.size()); ++i)
         {
@@ -6887,9 +6908,7 @@ public:
 
     std::function<void()> onNewProject;
     std::function<void()> onOpenProject;
-    std::function<void()> onOpenDemo;
     std::function<void()> onSettings;
-    std::function<void()> onDismiss;
     std::function<void(int)> onRecentProject;
 
 private:
@@ -6926,16 +6945,12 @@ private:
         panel.removeFromTop (10);
         auto actions = panel.removeFromTop (84);
         auto topActions = actions.removeFromTop (40);
-        newProjectButton.setBounds (topActions.removeFromLeft (150).reduced (0, 2));
+        newProjectButton.setBounds (topActions.removeFromLeft (176).reduced (0, 2));
         topActions.removeFromLeft (8);
         openProjectButton.setBounds (topActions.removeFromLeft (150).reduced (0, 2));
-        topActions.removeFromLeft (8);
-        openDemoButton.setBounds (topActions.removeFromLeft (126).reduced (0, 2));
 
         auto secondActions = actions.removeFromTop (40);
         settingsButton.setBounds (secondActions.removeFromLeft (150).reduced (0, 2));
-        secondActions.removeFromLeft (8);
-        dismissButton.setBounds (secondActions.removeFromLeft (126).reduced (0, 2));
 
         panel.removeFromTop (12);
         recentTitle.setBounds (panel.removeFromTop (24));
@@ -6956,9 +6971,7 @@ private:
     juce::Label recentTitle;
     juce::TextButton newProjectButton;
     juce::TextButton openProjectButton;
-    juce::TextButton openDemoButton;
     juce::TextButton settingsButton;
-    juce::TextButton dismissButton;
     std::array<juce::TextButton, 4> recentButtons;
     juce::StringArray recentPaths;
 };
@@ -7012,6 +7025,9 @@ public:
         addAndMakeVisible (rightInspectorDivider);
         addAndMakeVisible (fabricScriptLabel);
         addAndMakeVisible (fabricScriptEditor);
+        addAndMakeVisible (renderManagerLabel);
+        addAndMakeVisible (renderCancelButton);
+        addAndMakeVisible (renderRetryButton);
         addAndMakeVisible (projectStateTabs);
         addAndMakeVisible (stateTabs);
         addAndMakeVisible (arrangementStrip);
@@ -7101,6 +7117,23 @@ public:
 
             fabricStateProgram = fabricScriptEditor.getText();
             markFabricDirty();
+        };
+
+        renderManagerLabel.setText ("Render: idle", juce::dontSendNotification);
+        renderManagerLabel.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        renderManagerLabel.setColour (juce::Label::textColourId, mutedInk());
+        renderManagerLabel.setJustificationType (juce::Justification::centredLeft);
+
+        renderCancelButton.setButtonText ("Cancel");
+        renderCancelButton.onClick = [this]
+        {
+            cancelRenderAllQueue();
+        };
+
+        renderRetryButton.setButtonText ("Retry");
+        renderRetryButton.onClick = [this]
+        {
+            renderLanesNeedingAudio();
         };
 
         stateSummaryLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
@@ -7258,8 +7291,7 @@ public:
         masterGainSlider.onValueChange = [this]
         {
             const auto gain = static_cast<float> (masterGainSlider.getValue());
-            host.setMasterGain (gain);
-            renderedAudioPlayer.setMasterGain (gain);
+            applyMasterGainValue (gain, false);
         };
 
         rulesTracksDivider.onDragged = [this] (int delta)
@@ -7423,8 +7455,35 @@ public:
         {
             if (! fsmRunning)
             {
+                if (renderAllInProgress || countFreezingLanesInProject() > 0)
+                {
+                    statusLabel.setText ("Wait for rendering to finish", juce::dontSendNotification);
+                    refreshControls();
+                    return;
+                }
+
+                if (! liveSuperColliderOnlyPlayback)
+                {
+                    const auto lanesNeedingAudio = countLanesNeedingRenderedAudioInProject();
+                    if (lanesNeedingAudio > 0)
+                    {
+                        statusLabel.setText ("Render all first: " + juce::String (lanesNeedingAudio)
+                                             + " lane" + (lanesNeedingAudio == 1 ? "" : "s") + " need audio",
+                                             juce::dontSendNotification);
+                        refreshControls();
+                        return;
+                    }
+                }
+
                 fsmRunning = true;
-                beginFabricRun();
+                if (! beginFabricRun())
+                {
+                    fsmRunning = false;
+                    runButton.setButtonText ("Run");
+                    refreshControls();
+                    return;
+                }
+
                 if (machinePrepared && ! audioJobRunning)
                     startPreparedRun();
                 else
@@ -7759,7 +7818,10 @@ public:
 
         renderAllButton.onClick = [this]
         {
-            renderAllPlacedLanes();
+            if (renderAllInProgress)
+                cancelRenderAllQueue();
+            else
+                renderAllPlacedLanes();
         };
 
         exportAudioButton.onClick = [this]
@@ -7857,17 +7919,9 @@ public:
         {
             chooseProjectToLoad();
         };
-        welcomePanel.onOpenDemo = [this]
-        {
-            openWelcomeDemo();
-        };
         welcomePanel.onSettings = [this]
         {
             showSettings();
-        };
-        welcomePanel.onDismiss = [this]
-        {
-            hideWelcomePanel();
         };
         welcomePanel.onRecentProject = [this] (int index)
         {
@@ -8161,8 +8215,8 @@ public:
         };
 
         resetFabricStateProgram();
+        loadAppState();
         refreshControls();
-        restoreLastProject();
         resetUndoHistory();
         showWelcomePanel();
         setWantsKeyboardFocus (true);
@@ -8180,7 +8234,6 @@ public:
         settingsWindow = nullptr;
         audioDeviceManager.removeAudioCallback (&renderedAudioPlayer);
         renderedAudioPlayer.stopAll();
-        autosaveIfNeeded (true);
         saveAppState();
         stopTimer();
         codeDocument.removeListener (this);
@@ -8209,7 +8262,7 @@ public:
         trackList.clearState();
         mixer.clearState();
         navigator.clearMachines();
-        machine = MachineModel ("root", "", false);
+        machine = MachineModel ("root", "st1-", false);
         projectStateMachines.clear();
         machineStack.clear();
         activeMachine = &machine;
@@ -8218,9 +8271,10 @@ public:
         resetFabricStateProgram();
         laneMeters.clear();
         invalidatePreparedAudio();
-        projectStateCount = maxStateCount;
+        projectStateCount = 1;
         selectedProjectState = 0;
         ensureProjectStateMachines();
+        loadProjectStateFromStore (selectedProjectState);
         dirtyProject = false;
         cachedProjectMediaStatus = {};
         lastProjectMediaStatus = "New project";
@@ -8252,22 +8306,6 @@ public:
     void hideWelcomePanel()
     {
         welcomePanel.setVisible (false);
-    }
-
-    void openWelcomeDemo()
-    {
-        auto demo = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                        .getChildFile ("radigue-expanded.markovfsm");
-        if (! demo.existsAsFile())
-            demo = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                       .getChildFile ("demo1.markovfsm");
-
-        if (demo.existsAsFile() && loadProjectFromFile (demo))
-            return;
-
-        hideWelcomePanel();
-        newProject();
-        statusLabel.setText ("Demo file not found", juce::dontSendNotification);
     }
 
     void saveCurrentProject()
@@ -8310,6 +8348,32 @@ public:
                                                             });
         exportWindow->setVisible (true);
         exportWindow->toFront (true);
+    }
+
+    bool isLiveSuperColliderOnlyPlayback() const
+    {
+        return liveSuperColliderOnlyPlayback;
+    }
+
+    void setLiveSuperColliderOnlyPlayback (bool shouldUseLiveOnly)
+    {
+        if (liveSuperColliderOnlyPlayback == shouldUseLiveOnly)
+            return;
+
+        liveSuperColliderOnlyPlayback = shouldUseLiveOnly;
+        renderedAudioPlayer.stopAll();
+        renderedLaneLoopVersions.clear();
+        invalidatePreparedAudio();
+        saveAppState();
+        statusLabel.setText (liveSuperColliderOnlyPlayback ? "Live SuperCollider playback only"
+                                                            : "Rendered audio playback enabled",
+                             juce::dontSendNotification);
+        refreshControls();
+    }
+
+    void toggleLiveSuperColliderOnlyPlayback()
+    {
+        setLiveSuperColliderOnlyPlayback (! liveSuperColliderOnlyPlayback);
     }
 
     void cancelAudioExport()
@@ -8593,6 +8657,10 @@ public:
         auto fabricPaneInner = fabricPane.reduced (8, 0);
         auto fabricHeader = fabricPaneInner.removeFromTop (34);
         fabricScriptLabel.setBounds (fabricHeader.reduced (3));
+        auto renderManagerRow = fabricPaneInner.removeFromTop (30);
+        renderRetryButton.setBounds (renderManagerRow.removeFromRight (62).reduced (3, 4));
+        renderCancelButton.setBounds (renderManagerRow.removeFromRight (70).reduced (3, 4));
+        renderManagerLabel.setBounds (renderManagerRow.reduced (3, 4));
         fabricScriptEditor.setBounds (fabricPaneInner.reduced (0, 6));
 
         auto inspectorArea = tracksPane.reduced (10, 8);
@@ -9128,6 +9196,8 @@ private:
         statusLabel.setText (hasSignal ? "Freeze ready" : "Freeze was silent", juce::dontSendNotification);
         if (! hasSignal)
             appendLog ("Silent render kept stale: " + laneId + " -> " + frozenPath);
+        setRenderJobStateForLane (laneId, hasSignal ? RenderJobState::done : RenderJobState::failed, hasSignal ? "done" : "silent");
+        renderedAudioPlayer.clearCacheForPath (frozenPath);
         orbitCanvas.invalidateWaveforms();
         markMachineDirty (UndoGroup::continuous);
         refreshProjectMediaStatus();
@@ -9192,14 +9262,9 @@ private:
         const auto now = juce::Time::getMillisecondCounterHiRes();
         flushLogViewIfNeeded (now, false);
 
-        if (now - lastAutosaveTimerMs >= 1000.0)
-        {
-            lastAutosaveTimerMs = now;
-            autosaveIfNeeded (false);
-        }
-
         tickVisualScheduler (now);
         tickOrbitConnections (now);
+        continueQueuedRenderAllIfReady();
     }
 
     float getOscFloat (const juce::OSCArgument& argument) const
@@ -9245,15 +9310,6 @@ private:
         return dir.getChildFile ("app-state.json");
     }
 
-    juce::File autosaveFile() const
-    {
-        auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                       .getChildFile ("of")
-                       .getChildFile ("autosave");
-        dir.createDirectory();
-        return dir.getChildFile ("Last Session.markovfsm");
-    }
-
     void addRecentProject (const juce::File& file)
     {
         if (file == juce::File())
@@ -9268,9 +9324,8 @@ private:
     void saveAppState()
     {
         auto object = new juce::DynamicObject();
-        object->setProperty ("lastProject", currentProjectFile.getFullPathName());
-        object->setProperty ("lastAutosave", autosaveFile().getFullPathName());
         object->setProperty ("colourblindSafeMode", colourblindSafeMode);
+        object->setProperty ("liveSuperColliderOnlyPlayback", liveSuperColliderOnlyPlayback);
         object->setProperty ("arrangementViewMode", arrangementViewMode);
         object->setProperty ("arrangementViewVisible", arrangementViewMode > 0);
         object->setProperty ("scOutputDevice", scAudioSettings.outputDevice);
@@ -9304,12 +9359,9 @@ private:
                 if (path.toString().isNotEmpty())
                     recentProjects.addIfNotAlreadyThere (path.toString());
 
-        auto lastProject = parsed.getProperty ("lastProject", {}).toString();
-        if (lastProject.isNotEmpty())
-            currentProjectFile = juce::File (lastProject);
-
         colourblindSafeMode = static_cast<bool> (parsed.getProperty ("colourblindSafeMode", false));
         setColourblindSafePalette (colourblindSafeMode);
+        liveSuperColliderOnlyPlayback = static_cast<bool> (parsed.getProperty ("liveSuperColliderOnlyPlayback", false));
         arrangementViewMode = juce::jlimit (0, 2, static_cast<int> (parsed.getProperty ("arrangementViewMode",
                                                                                          static_cast<bool> (parsed.getProperty ("arrangementViewVisible", false)) ? 1 : 0)));
         scAudioSettings.outputDevice = parsed.getProperty ("scOutputDevice", {}).toString().trim();
@@ -9333,26 +9385,6 @@ private:
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
         renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
-    }
-
-    bool restoreLastProject()
-    {
-        loadAppState();
-
-        const auto autosave = autosaveFile();
-        if (autosave.existsAsFile())
-        {
-            loadingProjectInternally = true;
-            const auto loaded = loadProjectFromFile (autosave, false);
-            loadingProjectInternally = false;
-            if (loaded)
-            {
-                statusLabel.setText ("Restored last session", juce::dontSendNotification);
-                return true;
-            }
-        }
-
-        return false;
     }
 
     juce::File projectMediaFreezeDirectory (const juce::File& projectFile) const
@@ -9456,6 +9488,18 @@ private:
         ProjectMediaStatus status;
         const auto file = projectFile != juce::File() ? projectFile : currentProjectFile;
         validateProjectMediaInMachine (machine, file, status);
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+                continue;
+
+            if (stateIndex >= 0
+                && stateIndex < static_cast<int> (projectStateMachines.size())
+                && projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+            {
+                validateProjectMediaInMachine (*projectStateMachines[static_cast<size_t> (stateIndex)], file, status);
+            }
+        }
         return status;
     }
 
@@ -9522,6 +9566,22 @@ private:
 
             if (auto* child = model.childMachine (state.index))
                 bundleFrozenMediaForProject (*child, projectFile);
+        }
+    }
+
+    void bundleFrozenMediaForWholeProject (const juce::File& projectFile)
+    {
+        ensureUniqueProjectLaneIds();
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+            {
+                bundleFrozenMediaForProject (machine, projectFile);
+                continue;
+            }
+
+            if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+                bundleFrozenMediaForProject (*projectStateMachines[static_cast<size_t> (stateIndex)], projectFile);
         }
     }
 
@@ -9763,7 +9823,7 @@ private:
         runButton.setButtonText ("Run");
 
         rateSlider.setValue (1.0, juce::dontSendNotification);
-        projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", maxStateCount)));
+        projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", 1)));
         selectedProjectState = juce::jlimit (0, projectStateCount - 1, static_cast<int> (parsed.getProperty ("selectedProjectState", 0)));
         loadProjectStateMachinesFromProjectVar (parsed, loadedMachine);
         loadFabricStateProgramFromProjectVar (parsed);
@@ -9994,9 +10054,10 @@ private:
 
     std::unique_ptr<MachineModel> makeBlankProjectStateMachine (int projectStateIndex) const
     {
-        auto blank = std::make_unique<MachineModel> ("root", "", false);
+        const auto prefix = "st" + juce::String (projectStateIndex + 1) + "-";
+        auto blank = std::make_unique<MachineModel> ("root", prefix, false);
         blank->machineId = "state_" + juce::String (projectStateIndex + 1);
-        blank->lanePrefix = "st" + juce::String (projectStateIndex + 1) + "-";
+        blank->lanePrefix = prefix;
         blank->selectedState = 0;
         blank->selectedLane = 0;
         blank->entryState = 0;
@@ -10022,6 +10083,71 @@ private:
         for (int i = 0; i < projectStateCount; ++i)
             if (projectStateMachines[static_cast<size_t> (i)] == nullptr)
                 projectStateMachines[static_cast<size_t> (i)] = makeBlankProjectStateMachine (i);
+    }
+
+    juce::String makeUniqueProjectLaneId (MachineModel& model,
+                                          int stateIndex,
+                                          int laneIndex,
+                                          const std::unordered_set<std::string>& usedIds) const
+    {
+        for (int offset = 0; offset < 512; ++offset)
+        {
+            const auto candidate = model.makeLaneId (stateIndex, laneIndex + offset);
+            if (usedIds.find (candidate.toStdString()) == usedIds.end())
+                return candidate;
+        }
+
+        return model.makeLaneId (stateIndex, laneIndex) + "-" + juce::Uuid().toString().substring (0, 8);
+    }
+
+    bool repairDuplicateLaneIdsInMachine (MachineModel& model, std::unordered_set<std::string>& usedIds)
+    {
+        auto repaired = false;
+        for (auto& state : model.states)
+        {
+            for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+            {
+                auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                auto key = lane.id.toStdString();
+                if (lane.id.isEmpty() || usedIds.find (key) != usedIds.end())
+                {
+                    lane.id = makeUniqueProjectLaneId (model, state.index, laneIndex, usedIds);
+                    lane.preparedBridge = -1;
+                    if (lane.frozen)
+                        lane.freezeStale = true;
+
+                    key = lane.id.toStdString();
+                    repaired = true;
+                }
+
+                usedIds.insert (key);
+            }
+
+            if (auto* child = model.childMachine (state.index))
+                repaired = repairDuplicateLaneIdsInMachine (*child, usedIds) || repaired;
+        }
+
+        return repaired;
+    }
+
+    bool ensureUniqueProjectLaneIds()
+    {
+        ensureProjectStateMachines();
+        std::unordered_set<std::string> usedIds;
+        auto repaired = false;
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+            {
+                repaired = repairDuplicateLaneIdsInMachine (machine, usedIds) || repaired;
+                continue;
+            }
+
+            if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+                repaired = repairDuplicateLaneIdsInMachine (*projectStateMachines[static_cast<size_t> (stateIndex)], usedIds) || repaired;
+        }
+
+        return repaired;
     }
 
     void syncCurrentProjectStateToStore()
@@ -10097,17 +10223,15 @@ private:
         }
 
         ensureProjectStateMachines();
+        std::unordered_set<std::string> usedIds;
+        for (int i = 0; i < projectStateCount; ++i)
+            if (projectStateMachines[static_cast<size_t> (i)] != nullptr)
+                repairDuplicateLaneIdsInMachine (*projectStateMachines[static_cast<size_t> (i)], usedIds);
     }
 
     juce::String defaultFabricStateProgram() const
     {
-        return "start state 1 from bar 0\n"
-               "after 2 bars -> state 2 from bar 0\n"
-               "after 15 seconds -> state 4 from bar 1\n"
-               "after 15 seconds -> state 3 from bar 1\n"
-               "after 4 bars -> random state 5..6 from bar 0\n"
-               "play selected for 60 seconds\n"
-               "fade out over 30 seconds\n";
+        return "start state 1 from bar 0\n";
     }
 
     void resetFabricStateProgram()
@@ -10145,7 +10269,7 @@ private:
             const juce::ScopedValueSetter<juce::File> mediaBase (loadingProjectDirectory, file.getParentDirectory());
             if (! machineFromProjectVar (loadedMachine, machineVar))
                 return false;
-            projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", maxStateCount)));
+            projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", 1)));
             selectedProjectState = juce::jlimit (0, projectStateCount - 1, static_cast<int> (parsed.getProperty ("selectedProjectState", 0)));
             loadProjectStateMachinesFromProjectVar (parsed, loadedMachine);
             loadFabricStateProgramFromProjectVar (parsed);
@@ -10200,7 +10324,7 @@ private:
         if (file.getFileExtension().isEmpty() || file.getFileExtension().compareIgnoreCase (".markovfsm") != 0)
             file = file.withFileExtension (".markovfsm");
 
-        bundleFrozenMediaForProject (machine, file);
+        bundleFrozenMediaForWholeProject (file);
         const auto text = juce::JSON::toString (makeProjectVar(), true);
         if (! file.replaceWithText (text))
             return false;
@@ -10614,28 +10738,6 @@ private:
         });
     }
 
-    void autosaveIfNeeded (bool force)
-    {
-        if (! dirtyProject)
-            return;
-
-        const auto now = juce::Time::getMillisecondCounterHiRes();
-        if (! force && now - lastDirtyMs < 4500.0)
-            return;
-
-        auto file = autosaveFile();
-        const auto text = juce::JSON::toString (makeProjectVar(), true);
-        if (file.replaceWithText (text))
-        {
-            dirtyProject = false;
-            saveProjectButton.setButtonText ("Save");
-            updateProjectFileLabel();
-            saveAppState();
-            if (! force)
-                statusLabel.setText ("Autosaved", juce::dontSendNotification);
-        }
-    }
-
     void applySchedulerState (const juce::String& machineId, int stateIndex)
     {
         if (machineId != machine.machineId)
@@ -11022,6 +11124,14 @@ private:
             return;
         }
 
+        if (renderAllInProgress || countFreezingLanesInProject() > 0)
+        {
+            statusLabel.setText ("Wait for rendering to finish", juce::dontSendNotification);
+            refreshProjectStateTabs();
+            projectStateTabs.setInteractionEnabled (false);
+            return;
+        }
+
         fsmRunning = false;
         stopTransport();
         renderedAudioPlayer.stopAll();
@@ -11044,12 +11154,21 @@ private:
         newCount = juce::jlimit (1, maxStateCount, newCount);
         topProjectStateCountEditor.setText (juce::String (newCount), false);
 
+        if (renderAllInProgress || countFreezingLanesInProject() > 0)
+        {
+            topProjectStateCountEditor.setText (juce::String (projectStateCount), false);
+            statusLabel.setText ("Wait for rendering to finish", juce::dontSendNotification);
+            refreshControls();
+            return;
+        }
+
         if (newCount == projectStateCount)
             return;
 
         syncCurrentProjectStateToStore();
         projectStateCount = newCount;
         ensureProjectStateMachines();
+        ensureUniqueProjectLaneIds();
         if (selectedProjectState >= projectStateCount)
         {
             selectedProjectState = projectStateCount - 1;
@@ -11062,6 +11181,13 @@ private:
 
     struct FabricEvent
     {
+        enum class Type
+        {
+            switchState,
+            fadeOut
+        };
+
+        Type type = Type::switchState;
         double waitValue = 0.0;
         bool waitUsesBars = false;
         int targetState = -1;
@@ -11070,6 +11196,24 @@ private:
         double fromBar = 0.0;
         double extraWaitValue = 0.0;
         bool extraWaitUsesBars = false;
+        double fadeSeconds = 0.0;
+    };
+
+    struct FabricParseResult
+    {
+        std::vector<FabricEvent> events;
+        juce::StringArray errors;
+        int initialState = 0;
+        double initialStartBar = 0.0;
+        bool loop = false;
+
+        bool ok() const { return errors.isEmpty(); }
+    };
+
+    struct FabricDuration
+    {
+        double value = 0.0;
+        bool usesBars = false;
     };
 
     static juce::String stripFabricComment (juce::String line)
@@ -11080,6 +11224,30 @@ private:
         return line.trim();
     }
 
+    static bool parseFabricDurationText (const juce::String& text, FabricDuration& duration)
+    {
+        auto words = juce::StringArray::fromTokens (text.trim(), " \t\r\n", "");
+        if (words.isEmpty())
+            return false;
+
+        duration.value = words[0].getDoubleValue();
+        if (duration.value <= 0.0)
+            return false;
+
+        const auto unit = words.size() > 1 ? words[1].toLowerCase() : juce::String();
+        duration.usesBars = unit.startsWith ("bar");
+        return duration.usesBars || unit.startsWith ("sec") || unit.startsWith ("second");
+    }
+
+    static int parseStateNumberAfter (const juce::String& text, const juce::String& marker)
+    {
+        auto token = text.fromFirstOccurrenceOf (marker, false, false)
+                         .trim()
+                         .upToFirstOccurrenceOf (" ", false, false)
+                         .trim();
+        return token.getIntValue();
+    }
+
     static double parseFirstNumberAfter (const juce::String& text, const juce::String& marker, double fallback)
     {
         auto section = text.fromFirstOccurrenceOf (marker, false, true).trim();
@@ -11088,36 +11256,111 @@ private:
         return section.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
     }
 
-    std::vector<FabricEvent> parseFabricStateEvents() const
+    FabricParseResult parseFabricStateProgram() const
     {
-        std::vector<FabricEvent> events;
+        FabricParseResult result;
         const auto lines = juce::StringArray::fromLines (fabricStateProgram);
         double pendingPlayValue = 0.0;
         bool pendingPlayUsesBars = false;
+        auto sawStart = false;
 
-        for (auto rawLine : lines)
+        for (int lineIndex = 0; lineIndex < lines.size(); ++lineIndex)
         {
-            auto line = stripFabricComment (rawLine).toLowerCase();
+            auto line = stripFabricComment (lines[lineIndex]).toLowerCase();
+            const auto lineNumber = lineIndex + 1;
+            auto addError = [&result, lineNumber] (const juce::String& message)
+            {
+                result.errors.add ("Line " + juce::String (lineNumber) + ": " + message);
+            };
+
+            if (line.isEmpty())
+                continue;
+
+            if (line.startsWith ("start state "))
+            {
+                const auto stateNumber = parseStateNumberAfter (line, "start state ");
+                if (stateNumber <= 0 || stateNumber > projectStateCount)
+                {
+                    addError ("state number must be 1-" + juce::String (projectStateCount));
+                    continue;
+                }
+
+                result.initialState = stateNumber - 1;
+                result.initialStartBar = parseFirstNumberAfter (line, "from bar ", 0.0);
+                sawStart = true;
+                continue;
+            }
+
             if (line.startsWith ("play selected for "))
             {
                 auto playText = line.fromFirstOccurrenceOf ("play selected for ", false, false).trim();
-                pendingPlayValue = playText.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
-                pendingPlayUsesBars = playText.contains ("bar");
+                FabricDuration duration;
+                if (! parseFabricDurationText (playText, duration))
+                {
+                    addError ("expected 'play selected for N bars' or 'N seconds'");
+                    continue;
+                }
+
+                pendingPlayValue = duration.value;
+                pendingPlayUsesBars = duration.usesBars;
+                continue;
+            }
+
+            if (line.startsWith ("fade out over "))
+            {
+                FabricDuration duration;
+                if (! parseFabricDurationText (line.fromFirstOccurrenceOf ("fade out over ", false, false), duration)
+                    || duration.usesBars)
+                {
+                    addError ("fade duration must be seconds");
+                    continue;
+                }
+
+                FabricEvent event;
+                event.type = FabricEvent::Type::fadeOut;
+                event.fadeSeconds = duration.value;
+                if (pendingPlayValue > 0.0)
+                {
+                    event.waitValue = pendingPlayValue;
+                    event.waitUsesBars = pendingPlayUsesBars;
+                    pendingPlayValue = 0.0;
+                }
+
+                result.events.push_back (event);
+                continue;
+            }
+
+            if (line == "loop")
+            {
+                result.loop = true;
                 continue;
             }
 
             if (! line.startsWith ("after "))
+            {
+                addError ("unknown command");
                 continue;
+            }
 
             const auto beforeArrow = line.upToFirstOccurrenceOf ("->", false, false).trim();
             const auto afterArrow = line.fromFirstOccurrenceOf ("->", false, false).trim();
             if (afterArrow.isEmpty())
+            {
+                addError ("expected '-> state N' or '-> random state A..B'");
                 continue;
+            }
 
             FabricEvent event;
             auto waitText = beforeArrow.fromFirstOccurrenceOf ("after ", false, false).trim();
-            event.waitValue = waitText.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
-            event.waitUsesBars = waitText.contains ("bar");
+            FabricDuration waitDuration;
+            if (! parseFabricDurationText (waitText, waitDuration))
+            {
+                addError ("expected 'after N bars' or 'after N seconds'");
+                continue;
+            }
+
+            event.waitValue = waitDuration.value;
+            event.waitUsesBars = waitDuration.usesBars;
             if (pendingPlayValue > 0.0)
             {
                 const auto duplicatePlayLine = pendingPlayUsesBars == event.waitUsesBars
@@ -11135,6 +11378,12 @@ private:
                 auto range = afterArrow.fromFirstOccurrenceOf ("random state ", false, false)
                                        .upToFirstOccurrenceOf (" ", false, false)
                                        .trim();
+                if (! range.contains (".."))
+                {
+                    addError ("random state needs a range like 2..6");
+                    continue;
+                }
+
                 event.randomStart = juce::jlimit (0, projectStateCount - 1, range.upToFirstOccurrenceOf ("..", false, false).getIntValue() - 1);
                 event.randomEnd = juce::jlimit (0, projectStateCount - 1, range.fromFirstOccurrenceOf ("..", false, false).getIntValue() - 1);
                 if (event.randomEnd < event.randomStart)
@@ -11142,19 +11391,42 @@ private:
             }
             else if (afterArrow.startsWith ("state "))
             {
-                event.targetState = juce::jlimit (0, projectStateCount - 1,
-                                                  afterArrow.fromFirstOccurrenceOf ("state ", false, false)
-                                                            .upToFirstOccurrenceOf (" ", false, false).getIntValue() - 1);
+                const auto stateNumber = parseStateNumberAfter (afterArrow, "state ");
+                if (stateNumber <= 0 || stateNumber > projectStateCount)
+                {
+                    addError ("state number must be 1-" + juce::String (projectStateCount));
+                    continue;
+                }
+
+                event.targetState = stateNumber - 1;
             }
             else
+            {
+                addError ("expected target state or random state range");
                 continue;
+            }
 
             event.fromBar = parseFirstNumberAfter (afterArrow, "from bar ", 0.0);
-            if (event.waitValue > 0.0)
-                events.push_back (event);
+            result.events.push_back (event);
         }
 
-        return events;
+        if (! sawStart)
+            result.errors.add ("Line 1: add 'start state N from bar X'");
+
+        return result;
+    }
+
+    void updateFabricValidationUi (const FabricParseResult& parsed)
+    {
+        fabricValidationOk = parsed.ok();
+        fabricValidationMessage = parsed.ok()
+            ? ("OK  |  " + juce::String (static_cast<int> (parsed.events.size())) + " event"
+               + (parsed.events.size() == 1 ? "" : "s") + (parsed.loop ? "  |  loop" : ""))
+            : parsed.errors[0];
+
+        fabricScriptLabel.setText ("Fabric State Program  |  " + fabricValidationMessage, juce::dontSendNotification);
+        fabricScriptLabel.setColour (juce::Label::textColourId, parsed.ok() ? accentB().withAlpha (0.86f)
+                                                                            : graphColour (4).brighter (0.15f));
     }
 
     double secondsForFabricBars (double bars) const
@@ -11168,40 +11440,29 @@ private:
 
     int initialFabricState() const
     {
-        const auto lines = juce::StringArray::fromLines (fabricStateProgram);
-        for (auto rawLine : lines)
-        {
-            const auto line = stripFabricComment (rawLine).toLowerCase();
-            if (line.startsWith ("start state "))
-                return juce::jlimit (0, projectStateCount - 1,
-                                     line.fromFirstOccurrenceOf ("start state ", false, false)
-                                         .upToFirstOccurrenceOf (" ", false, false).getIntValue() - 1);
-        }
-
-        return 0;
+        return parseFabricStateProgram().initialState;
     }
 
     double initialFabricStartBar() const
     {
-        const auto lines = juce::StringArray::fromLines (fabricStateProgram);
-        for (auto rawLine : lines)
-        {
-            const auto line = stripFabricComment (rawLine).toLowerCase();
-            if (line.startsWith ("start state "))
-                return parseFirstNumberAfter (line, "from bar ", 0.0);
-        }
-
-        return 0.0;
+        return parseFabricStateProgram().initialStartBar;
     }
 
-    void beginFabricRun()
+    bool beginFabricRun()
     {
-        fabricSchedulerEvents = parseFabricStateEvents();
-        fabricSchedulerCursor = 0;
-        ++fabricSchedulerGeneration;
-        currentFabricStartBar = initialFabricStartBar();
+        const auto parsed = parseFabricStateProgram();
+        updateFabricValidationUi (parsed);
+        if (! parsed.ok())
+            return false;
 
-        const auto startState = initialFabricState();
+        fabricSchedulerEvents = parsed.events;
+        fabricSchedulerCursor = 0;
+        fabricLoopEnabled = parsed.loop;
+        ++fabricSchedulerGeneration;
+        currentFabricStartBar = parsed.initialStartBar;
+        fabricPreFadeMasterGain = static_cast<float> (masterGainSlider.getValue());
+
+        const auto startState = parsed.initialState;
         if (startState != selectedProjectState)
         {
             syncCurrentProjectStateToStore();
@@ -11209,6 +11470,8 @@ private:
             loadProjectStateFromStore (selectedProjectState);
             refreshProjectStateTabs();
         }
+
+        return true;
     }
 
     void switchProjectStateForFabric (int newIndex, double fromBar)
@@ -11234,7 +11497,6 @@ private:
         refreshProjectStateTabs();
         machinePrepared = false;
         startPreparedRun();
-        startPrepareJob (false);
     }
 
     void scheduleNextFabricEvent (size_t eventIndex, int generation)
@@ -11243,7 +11505,12 @@ private:
             return;
 
         if (eventIndex >= fabricSchedulerEvents.size())
+        {
+            if (! fabricLoopEnabled)
+                return;
+
             eventIndex = 0;
+        }
 
         const auto event = fabricSchedulerEvents[eventIndex];
         const auto waitSeconds = (event.waitUsesBars ? secondsForFabricBars (event.waitValue) : event.waitValue)
@@ -11264,8 +11531,83 @@ private:
             {
                 safeThis->appendLog ("Fabric state -> State " + juce::String (target + 1));
                 safeThis->switchProjectStateForFabric (target, event.fromBar);
+                return;
+            }
+
+            if (event.type == FabricEvent::Type::fadeOut)
+            {
+                safeThis->appendLog ("Fabric fade out over " + juce::String (event.fadeSeconds, 2) + "s");
+                safeThis->startFabricFadeOut (event.fadeSeconds, generation);
             }
         });
+    }
+
+    void applyMasterGainValue (float gain, bool updateSlider)
+    {
+        const auto clipped = juce::jlimit (0.0f, 5.0f, gain);
+        if (updateSlider)
+            masterGainSlider.setValue (clipped, juce::dontSendNotification);
+
+        host.setMasterGain (clipped);
+        renderedAudioPlayer.setMasterGain (clipped);
+    }
+
+    void stopFabricRunAfterFade()
+    {
+        fsmRunning = false;
+        ++playbackGeneration;
+        stopTransport();
+        renderedAudioPlayer.stopAll();
+        host.pauseMachine();
+        host.stopAll (machine);
+        graph.clearTimingPulse();
+        arrangementStrip.clearTimingPulse();
+        orbitCanvas.clearReversePlayheads();
+        orbitConnectionTransportStartMs = 0.0;
+        previousOrbitConnectionPhases.clear();
+        visualNextStateMs = 0.0;
+        scheduledTransitionTargetMs = 0.0;
+        scheduledVisualNextState = -1;
+        runButton.setButtonText ("Run");
+        refreshControls();
+    }
+
+    void startFabricFadeOut (double durationSeconds, int generation)
+    {
+        const auto steps = juce::jlimit (8, 120, juce::roundToInt (durationSeconds * 30.0));
+        const auto startGain = static_cast<float> (masterGainSlider.getValue());
+        const auto durationMs = juce::jmax (50, juce::roundToInt (durationSeconds * 1000.0));
+
+        for (int step = 1; step <= steps; ++step)
+        {
+            const auto delayMs = juce::roundToInt ((static_cast<double> (step) / static_cast<double> (steps)) * durationMs);
+            juce::Timer::callAfterDelay (delayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this),
+                                                   generation,
+                                                   step,
+                                                   steps,
+                                                   startGain]
+            {
+                if (safeThis == nullptr || ! safeThis->fsmRunning || generation != safeThis->fabricSchedulerGeneration)
+                    return;
+
+                const auto t = static_cast<float> (step) / static_cast<float> (steps);
+                safeThis->applyMasterGainValue (startGain * (1.0f - t), true);
+
+                if (step == steps)
+                {
+                    if (safeThis->fabricLoopEnabled)
+                    {
+                        safeThis->applyMasterGainValue (safeThis->fabricPreFadeMasterGain, true);
+                        if (safeThis->beginFabricRun())
+                            safeThis->startPreparedRun();
+                    }
+                    else
+                    {
+                        safeThis->stopFabricRunAfterFade();
+                    }
+                }
+            });
+        }
     }
 
     void markFabricDirty()
@@ -11276,11 +11618,23 @@ private:
         saveProjectButton.setButtonText ("Save*");
         updateProjectFileLabel();
         statusLabel.setText ("Fabric edited", juce::dontSendNotification);
+        updateFabricValidationUi (parseFabricStateProgram());
     }
 
     juce::String getSclangPathOverride() const
     {
         return {};
+    }
+
+    juce::String resolvedFrozenAudioPathForPlayback (const Lane& lane) const
+    {
+        if (lane.frozenAudioPath.isEmpty())
+            return {};
+
+        const auto file = currentProjectFile == juce::File()
+            ? juce::File (lane.frozenAudioPath)
+            : resolveProjectMediaFile (lane.frozenAudioPath, currentProjectFile);
+        return file.getFullPathName();
     }
 
     juce::File freezeFileForLane (const Lane& lane) const
@@ -11334,6 +11688,7 @@ private:
                                          4096);
         juce::int64 position = 0;
         auto peak = 0.0f;
+        auto sawFiniteSample = false;
 
         while (position < reader->lengthInSamples && peak < 0.0005f)
         {
@@ -11342,12 +11697,23 @@ private:
             reader->read (&buffer, 0, block, position, true, true);
 
             for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                peak = juce::jmax (peak, buffer.getMagnitude (channel, 0, block));
+            {
+                const auto* samples = buffer.getReadPointer (channel);
+                for (int sample = 0; sample < block; ++sample)
+                {
+                    const auto value = samples[sample];
+                    if (! std::isfinite (value))
+                        return false;
+
+                    sawFiniteSample = true;
+                    peak = juce::jmax (peak, std::abs (value));
+                }
+            }
 
             position += block;
         }
 
-        return peak >= 0.0005f;
+        return sawFiniteSample && peak >= 0.0005f;
     }
 
     bool markFrozenLaneRenderFailedById (MachineModel& model, const juce::String& laneId, const juce::String& frozenPath)
@@ -11932,7 +12298,7 @@ private:
         auto& s = currentMachine().state (stateIndex);
         for (auto& lane : s.lanes)
             if (shouldPlayLane (s, lane))
-                host.play (lane, getSclangPathOverride());
+                playLaneUsingCurrentPlaybackEngine (lane);
     }
 
     void prepareAllLanes()
@@ -12071,7 +12437,80 @@ private:
             if (shouldPlayLane (state, lane))
                 lanesToStart.push_back (&lane);
 
-        host.transition (lanesToStop, lanesToStart, getSclangPathOverride(), musicalReleaseSeconds, scheduledTransitionDelaySeconds);
+        if (liveSuperColliderOnlyPlayback)
+        {
+            for (auto* lane : lanesToStop)
+                if (lane != nullptr)
+                    host.stop (*lane, musicalReleaseSeconds);
+
+            const auto delayMs = juce::roundToInt (scheduledTransitionDelaySeconds * 1000.0);
+            for (auto* lane : lanesToStart)
+            {
+                if (lane == nullptr)
+                    continue;
+
+                if (delayMs <= 1)
+                {
+                    playLaneUsingCurrentPlaybackEngine (*lane);
+                }
+                else
+                {
+                    const auto laneId = lane->id;
+                    juce::Timer::callAfterDelay (delayMs, [safeThis = juce::Component::SafePointer<MainComponent> (this), laneId]
+                    {
+                        if (safeThis == nullptr)
+                            return;
+
+                        if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
+                            safeThis->playLaneUsingCurrentPlaybackEngine (*laneToPlay);
+                    });
+                }
+            }
+        }
+        else
+        {
+            for (auto* lane : lanesToStop)
+            {
+                if (lane == nullptr)
+                    continue;
+
+                renderedAudioPlayer.stopLane (lane->id);
+                host.stop (*lane, 0.02);
+                lane->playing = false;
+            }
+
+            const auto delaySeconds = scheduledTransitionDelaySeconds;
+            const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
+            for (auto* lane : lanesToStart)
+            {
+                if (lane == nullptr || ! shouldUseJuceRenderedAudio (*lane))
+                    continue;
+
+                auto playbackLane = *lane;
+                playbackLane.frozenAudioPath = resolvedFrozenAudioPathForPlayback (*lane);
+                const auto duration = lane->frozenDurationSeconds > 0.0 ? lane->frozenDurationSeconds
+                                                                         : laneRenderDurationSeconds (state, *lane);
+                auto scheduleLane = [safeThis = juce::Component::SafePointer<MainComponent> (this),
+                                     playbackLane,
+                                     laneId = lane->id,
+                                     gain = effectiveLaneVolume (state, *lane),
+                                     duration]
+                {
+                    if (safeThis == nullptr || ! safeThis->fsmRunning)
+                        return;
+
+                    safeThis->renderedAudioPlayer.stopLane (laneId);
+                    if (safeThis->renderedAudioPlayer.scheduleLane (playbackLane, 0.0, gain, duration))
+                        if (auto* activeLane = safeThis->findLaneById (safeThis->machine, laneId))
+                            activeLane->playing = true;
+                };
+
+                if (delayMs <= 1)
+                    scheduleLane();
+                else
+                    juce::Timer::callAfterDelay (delayMs, std::move (scheduleLane));
+            }
+        }
 
         if (auto* child = model.childMachine (stateIndex))
             startChildMachineForParentState (*child);
@@ -12170,6 +12609,36 @@ private:
         });
 
         return ! anySolo || lane.solo;
+    }
+
+    bool shouldUseJuceRenderedAudio (const Lane& lane) const
+    {
+        return ! liveSuperColliderOnlyPlayback && laneHasUsableRenderedAudio (lane);
+    }
+
+    void playLaneUsingCurrentPlaybackEngine (Lane& lane)
+    {
+        if (liveSuperColliderOnlyPlayback)
+        {
+            host.playLive (lane, getSclangPathOverride());
+            return;
+        }
+
+        if (shouldUseJuceRenderedAudio (lane))
+        {
+            auto playbackLane = lane;
+            playbackLane.frozenAudioPath = resolvedFrozenAudioPathForPlayback (lane);
+            renderedAudioPlayer.stopLane (lane.id);
+            const auto duration = lane.frozenDurationSeconds > 0.0 ? lane.frozenDurationSeconds : 64.0;
+            if (renderedAudioPlayer.scheduleLane (playbackLane, 0.0, juce::jlimit (0.0f, 2.0f, lane.volume * lane.gain), duration))
+            {
+                lane.playing = true;
+                primeMeterForLane (lane);
+                return;
+            }
+        }
+
+        appendLog ("Rendered audio unavailable for " + lane.name);
     }
 
     float effectiveLaneVolume (const State& state, const Lane& lane) const
@@ -12358,15 +12827,14 @@ private:
             const auto delaySeconds = juce::jlimit (0.0, trackMs, trackMs * static_cast<double> (lane.orbitPhase)) / 1000.0;
             const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
             const auto laneId = lane.id;
-            const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+            const auto isRenderedLane = shouldUseJuceRenderedAudio (lane);
             if (isRenderedLane)
             {
                 scheduleRenderedLaneOrbitLoop (stateIndex, lane.id, delaySeconds, playbackGeneration, reverse);
             }
             else if (delayMs <= 1)
             {
-                host.play (lane, getSclangPathOverride());
-                lane.playing = true;
+                playLaneUsingCurrentPlaybackEngine (lane);
             }
             else
             {
@@ -12377,10 +12845,7 @@ private:
                         return;
 
                     if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
-                    {
-                        safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
-                        laneToPlay->playing = true;
-                    }
+                        safeThis->playLaneUsingCurrentPlaybackEngine (*laneToPlay);
                 });
             }
         }
@@ -12405,7 +12870,7 @@ private:
             const auto laneStart = juce::jlimit (0.0f, 0.9999f, lane.orbitPhase);
             const auto span = lanePhaseSpanForState (state, lane);
             const auto laneEnd = juce::jlimit (laneStart + 0.002f, 0.9999f, laneStart + span);
-            const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+            const auto isRenderedLane = shouldUseJuceRenderedAudio (lane);
             auto delaySeconds = 0.0;
             auto sourceOffsetSeconds = 0.0;
 
@@ -12434,8 +12899,7 @@ private:
 
             if (delayMs <= 1)
             {
-                host.play (lane, getSclangPathOverride());
-                lane.playing = true;
+                playLaneUsingCurrentPlaybackEngine (lane);
             }
             else
             {
@@ -12447,10 +12911,7 @@ private:
                         return;
 
                     if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
-                    {
-                        safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
-                        laneToPlay->playing = true;
-                    }
+                        safeThis->playLaneUsingCurrentPlaybackEngine (*laneToPlay);
                 });
             }
         }
@@ -12458,6 +12919,13 @@ private:
 
     void startRenderedOrbitConnectionTargetFromPhase (int stateIndex, float phase, bool reverse)
     {
+        if (liveSuperColliderOnlyPlayback)
+        {
+            juce::ignoreUnused (reverse);
+            startOrbitConnectionTargetFromPhase (stateIndex, phase);
+            return;
+        }
+
         auto& state = machine.state (stateIndex);
         const auto safePhase = juce::jlimit (0.0f, 0.9999f, phase);
         const auto rate = juce::jmax (0.05, rateSlider.getValue());
@@ -12512,6 +12980,13 @@ private:
         auto& state = machine.state (stateIndex);
         for (auto& lane : state.lanes)
         {
+            if (liveSuperColliderOnlyPlayback)
+            {
+                host.stop (lane);
+                lane.playing = false;
+                continue;
+            }
+
             if (! lane.frozen || lane.frozenAudioPath.isEmpty())
                 continue;
 
@@ -12587,7 +13062,7 @@ private:
                 }
                 const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
                 const auto laneId = lane.id;
-                const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+                const auto isRenderedLane = shouldUseJuceRenderedAudio (lane);
 
                 if (isRenderedLane)
                 {
@@ -12597,8 +13072,7 @@ private:
 
                 if (delayMs <= 1)
                 {
-                    host.play (lane, getSclangPathOverride());
-                    lane.playing = true;
+                    playLaneUsingCurrentPlaybackEngine (lane);
                 }
                 else
                 {
@@ -12608,7 +13082,7 @@ private:
                             return;
 
                         if (auto* laneToPlay = safeThis->findLaneById (safeThis->machine, laneId))
-                            safeThis->host.play (*laneToPlay, safeThis->getSclangPathOverride());
+                            safeThis->playLaneUsingCurrentPlaybackEngine (*laneToPlay);
                     });
                 }
             }
@@ -12624,6 +13098,9 @@ private:
                                         int loopVersion = -1)
     {
         if (! fsmRunning || playbackGeneration != generation)
+            return;
+
+        if (liveSuperColliderOnlyPlayback)
             return;
 
         if (stateIndex < 0 || stateIndex >= machine.getStateCount())
@@ -12643,8 +13120,16 @@ private:
         const auto rate = juce::jmax (0.05, rateSlider.getValue());
         const auto trackSeconds = state.secondsPerSection() / rate;
         const auto maxDuration = laneRenderDurationSeconds (state, *lane) / rate;
+        auto playbackLane = *lane;
+        playbackLane.frozenAudioPath = resolvedFrozenAudioPathForPlayback (*lane);
+        if (playbackLane.frozenAudioPath.isEmpty() || ! juce::File (playbackLane.frozenAudioPath).existsAsFile())
+        {
+            appendLog ("Rendered audio missing: " + lane->id + " -> " + lane->frozenAudioPath);
+            return;
+        }
 
-        if (renderedAudioPlayer.scheduleLane (*lane,
+        renderedAudioPlayer.stopLane (lane->id);
+        if (renderedAudioPlayer.scheduleLane (playbackLane,
                                               juce::jmax (0.0, delaySeconds),
                                               effectiveLaneVolume (state, *lane),
                                               maxDuration,
@@ -12696,7 +13181,7 @@ private:
         if (trackHasPlacedAudio && ! isPlacedAudio)
             return false;
 
-        return isPlacedAudio && lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+        return isPlacedAudio && laneHasUsableRenderedAudio (lane);
     }
 
     bool shouldRunPlacedLaneOnOrbit (const State& state, const Lane& lane, bool trackHasPlacedAudio) const
@@ -12704,7 +13189,7 @@ private:
         if (! shouldPlayLane (state, lane))
             return false;
 
-        const auto hasRenderedAudio = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
+        const auto hasRenderedAudio = laneHasUsableRenderedAudio (lane);
         const auto hasLiveSource = lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
         const auto isPlacedAudio = hasRenderedAudio || hasLiveSource || lane.frozenAudioPath.isNotEmpty();
         if (trackHasPlacedAudio && ! isPlacedAudio)
@@ -13030,6 +13515,242 @@ private:
         refreshControls();
     }
 
+    struct RenderAllLaneTarget
+    {
+        int projectStateIndex = -1;
+        std::vector<int> statePath;
+        int laneIndex = -1;
+    };
+
+    enum class RenderJobState
+    {
+        queued,
+        rendering,
+        done,
+        failed,
+        skipped
+    };
+
+    struct RenderJobStatus
+    {
+        RenderAllLaneTarget target;
+        juce::String label;
+        juce::String laneId;
+        juce::String detail;
+        RenderJobState state = RenderJobState::queued;
+        double startedMs = 0.0;
+        double endedMs = 0.0;
+    };
+
+    static juce::String renderJobStateText (RenderJobState state)
+    {
+        switch (state)
+        {
+            case RenderJobState::queued:    return "queued";
+            case RenderJobState::rendering: return "rendering";
+            case RenderJobState::done:      return "done";
+            case RenderJobState::failed:    return "failed";
+            case RenderJobState::skipped:   return "skipped";
+        }
+
+        return "queued";
+    }
+
+    MachineModel* childMachineForPath (MachineModel& root, const std::vector<int>& statePath)
+    {
+        auto* model = &root;
+        for (size_t i = 0; i + 1 < statePath.size(); ++i)
+        {
+            model = model->childMachine (statePath[i]);
+            if (model == nullptr)
+                return nullptr;
+        }
+
+        return model;
+    }
+
+    Lane* laneForRenderTarget (const RenderAllLaneTarget& target)
+    {
+        auto* projectModel = projectMachineForRenderState (target.projectStateIndex);
+        if (projectModel == nullptr || target.statePath.empty())
+            return nullptr;
+
+        auto* model = childMachineForPath (*projectModel, target.statePath);
+        if (model == nullptr)
+            return nullptr;
+
+        const auto stateIndex = target.statePath.back();
+        if (stateIndex < 0 || stateIndex >= model->getStateCount())
+            return nullptr;
+
+        auto& state = model->state (stateIndex);
+        if (target.laneIndex < 0 || target.laneIndex >= static_cast<int> (state.lanes.size()))
+            return nullptr;
+
+        return &state.lanes[static_cast<size_t> (target.laneIndex)];
+    }
+
+    juce::String renderTargetLabel (const RenderAllLaneTarget& target)
+    {
+        auto* projectModel = projectMachineForRenderState (target.projectStateIndex);
+        if (projectModel == nullptr || target.statePath.empty())
+            return "State " + juce::String (target.projectStateIndex + 1);
+
+        auto* model = childMachineForPath (*projectModel, target.statePath);
+        if (model == nullptr)
+            return "State " + juce::String (target.projectStateIndex + 1);
+
+        const auto stateIndex = target.statePath.back();
+        if (stateIndex < 0 || stateIndex >= model->getStateCount())
+            return "State " + juce::String (target.projectStateIndex + 1);
+
+        auto& state = model->state (stateIndex);
+        auto laneName = juce::String ("Lane ") + juce::String (target.laneIndex + 1);
+        if (target.laneIndex >= 0 && target.laneIndex < static_cast<int> (state.lanes.size()))
+            laneName = state.lanes[static_cast<size_t> (target.laneIndex)].name;
+
+        return "State " + juce::String (target.projectStateIndex + 1)
+             + " / " + trackDisplayName (state)
+             + " / " + laneName;
+    }
+
+    void rebuildRenderJobStatuses()
+    {
+        renderJobStatuses.clear();
+        renderJobStatuses.reserve (renderAllLaneQueue.size());
+
+        for (const auto& target : renderAllLaneQueue)
+        {
+            RenderJobStatus status;
+            status.target = target;
+            status.label = renderTargetLabel (target);
+            if (auto* lane = laneForRenderTarget (target))
+                status.laneId = lane->id;
+            renderJobStatuses.push_back (std::move (status));
+        }
+
+        updateRenderManagerUi();
+    }
+
+    void setRenderJobState (int targetIndex, RenderJobState state, const juce::String& detail)
+    {
+        if (targetIndex < 0 || targetIndex >= static_cast<int> (renderJobStatuses.size()))
+            return;
+
+        auto& job = renderJobStatuses[static_cast<size_t> (targetIndex)];
+        job.state = state;
+        job.detail = detail;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (state == RenderJobState::rendering && job.startedMs <= 0.0)
+            job.startedMs = now;
+        if (state == RenderJobState::done || state == RenderJobState::failed || state == RenderJobState::skipped)
+            job.endedMs = now;
+
+        updateRenderManagerUi();
+    }
+
+    void setRenderJobStateForLane (const juce::String& laneId, RenderJobState state, const juce::String& detail)
+    {
+        for (int i = 0; i < static_cast<int> (renderJobStatuses.size()); ++i)
+        {
+            if (renderJobStatuses[static_cast<size_t> (i)].laneId == laneId)
+            {
+                setRenderJobState (i, state, detail);
+                return;
+            }
+        }
+    }
+
+    int countRenderJobsWithState (RenderJobState state) const
+    {
+        return static_cast<int> (std::count_if (renderJobStatuses.begin(), renderJobStatuses.end(), [state] (const RenderJobStatus& job)
+        {
+            return job.state == state;
+        }));
+    }
+
+    void updateRenderManagerUi()
+    {
+        const auto total = static_cast<int> (renderJobStatuses.size());
+        const auto done = countRenderJobsWithState (RenderJobState::done);
+        const auto failed = countRenderJobsWithState (RenderJobState::failed);
+        const auto queued = countRenderJobsWithState (RenderJobState::queued);
+
+        juce::String text;
+        juce::Colour colour = mutedInk();
+        if (renderAllInProgress)
+        {
+            text = "Render: " + juce::String (done) + "/" + juce::String (total);
+            if (failed > 0)
+                text << "  |  " << failed << " failed";
+            if (renderAllCancelRequested)
+                text << "  |  stopping after current lane";
+            if (renderAllCurrentLaneTarget >= 0 && renderAllCurrentLaneTarget < static_cast<int> (renderJobStatuses.size()))
+                text << "  |  " << renderJobStatuses[static_cast<size_t> (renderAllCurrentLaneTarget)].label;
+            colour = failed > 0 ? graphColour (4).brighter (0.12f) : accentB().brighter (0.08f);
+        }
+        else if (total > 0)
+        {
+            text = "Render: " + juce::String (done) + " done";
+            if (failed > 0)
+                text << "  |  " << failed << " failed";
+            if (queued > 0)
+                text << "  |  " << queued << " queued";
+            colour = failed > 0 ? graphColour (4).brighter (0.12f) : graphColour (2).brighter (0.10f);
+        }
+        else
+        {
+            const auto needingAudio = countLanesNeedingRenderedAudioInProject();
+            text = needingAudio > 0 ? "Render: " + juce::String (needingAudio) + " lane"
+                                      + (needingAudio == 1 ? " needs audio" : "s need audio")
+                                    : "Render: all lanes ready";
+            colour = needingAudio > 0 ? accentB().brighter (0.06f) : mutedInk();
+        }
+
+        renderManagerLabel.setText (text, juce::dontSendNotification);
+        renderManagerLabel.setColour (juce::Label::textColourId, colour);
+        renderCancelButton.setEnabled (renderAllInProgress && ! renderAllCancelRequested);
+        renderRetryButton.setEnabled (! renderAllInProgress && countLanesNeedingRenderedAudioInProject() > 0);
+    }
+
+    bool beginFreezeRenderTarget (const RenderAllLaneTarget& target)
+    {
+        auto* projectModel = projectMachineForRenderState (target.projectStateIndex);
+        if (projectModel == nullptr || target.statePath.empty())
+            return false;
+
+        auto* model = childMachineForPath (*projectModel, target.statePath);
+        if (model == nullptr)
+            return false;
+
+        return beginFreezeLane (*model, target.statePath.back(), target.laneIndex);
+    }
+
+    void collectRenderableLaneTargetsInMachine (const MachineModel& model,
+                                                int projectStateIndex,
+                                                std::vector<int> statePath,
+                                                std::vector<RenderAllLaneTarget>& targets,
+                                                bool onlyNeedingAudio) const
+    {
+        for (int stateIndex = 0; stateIndex < model.getStateCount(); ++stateIndex)
+        {
+            auto path = statePath;
+            path.push_back (stateIndex);
+            const auto& state = model.states[static_cast<size_t> (stateIndex)];
+            for (int laneIndex = 0; laneIndex < static_cast<int> (state.lanes.size()); ++laneIndex)
+            {
+                const auto& lane = state.lanes[static_cast<size_t> (laneIndex)];
+                const auto hasSource = lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
+                const auto needsAudio = ! laneHasUsableRenderedAudio (lane);
+                if (hasSource && ! lane.freezeInProgress && (! onlyNeedingAudio || needsAudio))
+                    targets.push_back ({ projectStateIndex, path, laneIndex });
+            }
+
+            if (auto* child = model.childMachine (stateIndex))
+                collectRenderableLaneTargetsInMachine (*child, projectStateIndex, path, targets, onlyNeedingAudio);
+        }
+    }
+
     int renderAllPlacedLanesInMachine (MachineModel& model)
     {
         auto count = 0;
@@ -13087,33 +13808,91 @@ private:
 
     void continueQueuedRenderAllIfReady()
     {
-        if (! renderAllInProgress || renderAllCurrentProjectState < 0)
+        if (! renderAllInProgress || renderAllCurrentLaneTarget < 0)
             return;
 
-        if (auto* current = projectMachineForRenderState (renderAllCurrentProjectState))
-            if (countFreezingLanes (*current) > 0)
-                return;
+        if (auto* lane = laneForRenderTarget (renderAllLaneQueue[static_cast<size_t> (renderAllCurrentLaneTarget)]))
+            if (lane->freezeInProgress)
+            {
+                if (lane->frozenAudioPath.isNotEmpty() && renderedAudioFileHasSignal (lane->frozenAudioPath))
+                {
+                    const auto laneId = lane->id;
+                    const auto frozenPath = lane->frozenAudioPath;
+                    auto updated = updateFrozenLaneById (machine, laneId, frozenPath);
+
+                    ensureProjectStateMachines();
+                    for (int i = 0; i < projectStateCount; ++i)
+                        if (projectStateMachines[static_cast<size_t> (i)] != nullptr)
+                            updated = updateFrozenLaneById (*projectStateMachines[static_cast<size_t> (i)], laneId, frozenPath) || updated;
+
+                    if (updated)
+                    {
+                        appendLog ("Render detected: " + laneId);
+                        orbitCanvas.invalidateWaveforms();
+                        markMachineDirty (UndoGroup::continuous);
+                        refreshProjectMediaStatus();
+                        renderedAudioPlayer.clearCacheForPath (frozenPath);
+                        setRenderJobState (renderAllCurrentLaneTarget, RenderJobState::done, "done");
+                    }
+                }
+
+                if (lane->freezeInProgress)
+                {
+                    const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - renderAllCurrentLaneStartedMs;
+                    const auto timeoutMs = juce::jmax (30000.0, (lane->frozenDurationSeconds + 30.0) * 1000.0);
+                    if (renderAllCurrentLaneStartedMs > 0.0 && elapsedMs >= timeoutMs)
+                    {
+                        lane->freezeInProgress = false;
+                        lane->freezeStale = true;
+                        lane->preparedBridge = -1;
+                        appendLog ("Render timed out: " + lane->id);
+                        statusLabel.setText ("Render timed out: " + lane->name, juce::dontSendNotification);
+                        setRenderJobState (renderAllCurrentLaneTarget, RenderJobState::failed, "timed out");
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+            }
+
+        if (renderAllCancelRequested)
+        {
+            renderAllInProgress = false;
+            renderAllCurrentLaneTarget = -1;
+            renderAllCurrentLaneStartedMs = 0.0;
+            renderAllLaneQueue.clear();
+            renderAllQueueIndex = 0;
+            renderAllCancelRequested = false;
+            statusLabel.setText ("Render queue stopped", juce::dontSendNotification);
+            updateRenderManagerUi();
+            refreshControls();
+            return;
+        }
 
         renderNextQueuedProjectState();
     }
 
     void renderNextQueuedProjectState()
     {
-        while (renderAllQueueIndex < renderAllProjectStateQueue.size())
+        while (renderAllQueueIndex < renderAllLaneQueue.size())
         {
-            const auto projectStateIndex = renderAllProjectStateQueue[renderAllQueueIndex++];
-            auto* model = projectMachineForRenderState (projectStateIndex);
-            if (model == nullptr)
-                continue;
+            const auto targetIndex = static_cast<int> (renderAllQueueIndex++);
+            const auto& target = renderAllLaneQueue[static_cast<size_t> (targetIndex)];
 
-            renderAllCurrentProjectState = projectStateIndex;
-            const auto count = renderAllPlacedLanesInMachine (*model);
-            if (count <= 0)
+            renderAllCurrentLaneTarget = targetIndex;
+            if (! beginFreezeRenderTarget (target))
+            {
+                setRenderJobState (targetIndex, RenderJobState::failed, "could not start");
                 continue;
+            }
 
-            renderAllRenderedLaneCount += count;
-            statusLabel.setText ("Rendering State " + juce::String (projectStateIndex + 1)
-                                 + " (" + juce::String (count) + " lane" + (count == 1 ? "" : "s") + ")",
+            renderAllCurrentLaneStartedMs = juce::Time::getMillisecondCounterHiRes();
+            ++renderAllRenderedLaneCount;
+            setRenderJobState (targetIndex, RenderJobState::rendering, "rendering");
+            statusLabel.setText ("Rendering State " + juce::String (target.projectStateIndex + 1)
+                                 + " lane " + juce::String (renderAllRenderedLaneCount)
+                                 + " of " + juce::String (static_cast<int> (renderAllLaneQueue.size())),
                                  juce::dontSendNotification);
             orbitCanvas.invalidateWaveforms();
             refreshControls();
@@ -13121,15 +13900,20 @@ private:
         }
 
         renderAllInProgress = false;
-        renderAllCurrentProjectState = -1;
-        renderAllProjectStateQueue.clear();
+        renderAllCurrentLaneTarget = -1;
+        renderAllCurrentLaneStartedMs = 0.0;
+        renderAllLaneQueue.clear();
         renderAllQueueIndex = 0;
+        renderAllCancelRequested = false;
 
         if (renderAllRenderedLaneCount > 0)
         {
+            const auto failed = countRenderJobsWithState (RenderJobState::failed);
+            const auto done = countRenderJobsWithState (RenderJobState::done);
             statusLabel.setText ("Rendered " + juce::String (renderAllRenderedLaneCount) + " lane"
                                  + (renderAllRenderedLaneCount == 1 ? "" : "s") + " across "
-                                 + juce::String (projectStateCount) + " state" + (projectStateCount == 1 ? "" : "s"),
+                                 + juce::String (projectStateCount) + " state" + (projectStateCount == 1 ? "" : "s")
+                                 + (failed > 0 ? " | " + juce::String (failed) + " failed" : " | " + juce::String (done) + " ready"),
                                  juce::dontSendNotification);
             markMachineDirty();
             refreshProjectMediaStatus();
@@ -13140,10 +13924,11 @@ private:
         }
 
         renderAllRenderedLaneCount = 0;
+        updateRenderManagerUi();
         refreshControls();
     }
 
-    void renderAllPlacedLanes()
+    void startRenderQueue (bool onlyNeedingAudio)
     {
         if (renderAllInProgress)
         {
@@ -13151,32 +13936,56 @@ private:
             return;
         }
 
-        ensureProjectStateMachines();
-        renderAllProjectStateQueue.clear();
+        ensureUniqueProjectLaneIds();
+        renderAllLaneQueue.clear();
         renderAllQueueIndex = 0;
-        renderAllCurrentProjectState = -1;
+        renderAllCurrentLaneTarget = -1;
+        renderAllCurrentLaneStartedMs = 0.0;
         renderAllRenderedLaneCount = 0;
+        renderAllCancelRequested = false;
 
         for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
         {
             if (auto* model = projectMachineForRenderState (stateIndex))
-                if (countRenderablePlacedLanesInMachine (*model) > 0)
-                    renderAllProjectStateQueue.push_back (stateIndex);
+                collectRenderableLaneTargetsInMachine (*model, stateIndex, {}, renderAllLaneQueue, onlyNeedingAudio);
         }
 
-        if (! renderAllProjectStateQueue.empty())
+        if (! renderAllLaneQueue.empty())
         {
             renderAllInProgress = true;
-            statusLabel.setText ("Rendering queued across " + juce::String (renderAllProjectStateQueue.size())
-                                 + " state" + (renderAllProjectStateQueue.size() == 1 ? "" : "s"),
+            rebuildRenderJobStatuses();
+            statusLabel.setText ("Rendering " + juce::String (static_cast<int> (renderAllLaneQueue.size()))
+                                 + " lane" + (renderAllLaneQueue.size() == 1 ? "" : "s") + " one at a time",
                                  juce::dontSendNotification);
             renderNextQueuedProjectState();
         }
         else
         {
             statusLabel.setText ("No lanes to render", juce::dontSendNotification);
+            updateRenderManagerUi();
             refreshControls();
         }
+    }
+
+    void renderAllPlacedLanes()
+    {
+        startRenderQueue (false);
+    }
+
+    void renderLanesNeedingAudio()
+    {
+        startRenderQueue (true);
+    }
+
+    void cancelRenderAllQueue()
+    {
+        if (! renderAllInProgress)
+            return;
+
+        renderAllCancelRequested = true;
+        statusLabel.setText ("Stopping render queue after current lane", juce::dontSendNotification);
+        updateRenderManagerUi();
+        refreshControls();
     }
 
     int countStaleFrozenLanes (const MachineModel& model) const
@@ -13222,6 +14031,51 @@ private:
 
             if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
                 count += countFreezingLanes (*projectStateMachines[static_cast<size_t> (stateIndex)]);
+        }
+
+        return count;
+    }
+
+    bool laneHasRenderableSource (const Lane& lane) const
+    {
+        return lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
+    }
+
+    bool laneHasUsableRenderedAudio (const Lane& lane) const
+    {
+        if (! lane.frozen || lane.freezeStale || lane.freezeInProgress || lane.frozenAudioPath.isEmpty())
+            return false;
+
+        return renderedAudioFileHasSignal (resolvedFrozenAudioPathForPlayback (lane));
+    }
+
+    int countLanesNeedingRenderedAudio (const MachineModel& model) const
+    {
+        auto count = 0;
+        for (const auto& state : model.states)
+        {
+            for (const auto& lane : state.lanes)
+                if (lane.enabled && laneHasRenderableSource (lane) && ! laneHasUsableRenderedAudio (lane))
+                    ++count;
+
+            if (auto* child = model.childMachine (state.index))
+                count += countLanesNeedingRenderedAudio (*child);
+        }
+
+        return count;
+    }
+
+    int countLanesNeedingRenderedAudioInProject()
+    {
+        ensureUniqueProjectLaneIds();
+        auto count = countLanesNeedingRenderedAudio (machine);
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+                continue;
+
+            if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+                count += countLanesNeedingRenderedAudio (*projectStateMachines[static_cast<size_t> (stateIndex)]);
         }
 
         return count;
@@ -13425,6 +14279,7 @@ private:
     {
         updateProjectFileLabel();
         updateInspectorModeButtons();
+        updateFabricValidationUi (parseFabricStateProgram());
         refreshStateTabs();
         refreshTrackList();
         rules.setMachine (currentInspectorMachine());
@@ -13441,6 +14296,7 @@ private:
         const auto mediaStatus = cachedProjectMediaStatus;
         const auto mediaSummary = mediaStatusSummary (mediaStatus);
         const auto freezingCount = countFreezingLanesInProject();
+        const auto renderingLocked = renderAllInProgress || freezingCount > 0;
         const auto freezeSuffix = freezingCount > 0 ? " | " + juce::String (freezingCount) + " freezing" : juce::String();
         if (selectedLane.freezeInProgress)
         {
@@ -13469,7 +14325,9 @@ private:
         }
         refreezeLaneButton.setEnabled (! selectedLane.freezeInProgress);
         refreezeStaleButton.setEnabled ((mediaStatus.stale > 0 || mediaStatus.missing > 0 || countStaleFrozenLanesInProject() > 0) && freezingCount == 0);
-        renderAllButton.setEnabled (! renderAllInProgress && freezingCount == 0);
+        renderAllButton.setButtonText (renderAllInProgress ? (renderAllCancelRequested ? "Stopping" : "Cancel render") : "Render all");
+        renderAllButton.setEnabled ((renderAllInProgress && ! renderAllCancelRequested) || freezingCount == 0);
+        updateRenderManagerUi();
         breadcrumbLabel.setText (makeBreadcrumb(), juce::dontSendNotification);
         stateSummaryLabel.setText (makeStateSummary(), juce::dontSendNotification);
         const auto& inspectedState = currentInspectorMachine().state (currentInspectorMachine().selectedState);
@@ -13538,6 +14396,9 @@ private:
                                                                                         : rowFill().interpolatedWith (accentA(), 0.16f));
         exportAudioButton.setColour (juce::TextButton::textColourOffId, exportInProgress ? accentC().brighter (0.10f)
                                                                                          : accentA().brighter (0.04f));
+        topProjectStateCountMinus.setEnabled (! renderingLocked);
+        topProjectStateCountEditor.setEnabled (! renderingLocked);
+        topProjectStateCountPlus.setEnabled (! renderingLocked);
         shapeEditButton.setToggleState (orbitShapeEditMode, juce::dontSendNotification);
         shapeEditButton.setColour (juce::TextButton::buttonColourId, orbitShapeEditMode ? rowFill().interpolatedWith (accentB(), 0.22f)
                                                                                         : rowFill().interpolatedWith (accentB(), 0.08f));
@@ -13556,6 +14417,7 @@ private:
         rules.repaint();
         graph.setInspectedMachine (&currentInspectorMachine());
         refreshProjectStateTabs();
+        projectStateTabs.setInteractionEnabled (! renderingLocked);
         updateTransitionPreview();
     }
 
@@ -13586,7 +14448,7 @@ private:
         if (currentProjectFile.existsAsFile())
             return currentProjectFile.getFileName();
 
-        return autosaveFile().getFileName();
+        return "Untitled";
     }
 
     void updateProjectFileLabel()
@@ -13651,6 +14513,9 @@ private:
     juce::Slider rateSlider;
     juce::Label fabricScriptLabel;
     juce::TextEditor fabricScriptEditor;
+    juce::Label renderManagerLabel;
+    juce::TextButton renderCancelButton;
+    juce::TextButton renderRetryButton;
     PillBar projectStateTabs;
     PillBar stateTabs;
     ArrangementStripComponent arrangementStrip;
@@ -13714,10 +14579,14 @@ private:
     bool codeExpanded = false;
     int headerCompactLevel = 0;
     int arrangementViewMode = 0;
-    int projectStateCount = maxStateCount;
+    int projectStateCount = 1;
     int selectedProjectState = 0;
     juce::String fabricStateProgram;
     bool updatingFabricScriptEditor = false;
+    bool fabricValidationOk = true;
+    bool fabricLoopEnabled = false;
+    juce::String fabricValidationMessage;
+    float fabricPreFadeMasterGain = 1.0f;
     bool orbitShapeEditMode = false;
     int orbitFocusedTrack = -1;
     int selectedRenderedWaveformState = -1;
@@ -13729,11 +14598,14 @@ private:
     int fabricSchedulerGeneration = 0;
     double currentFabricStartBar = 0.0;
     std::unordered_map<std::string, int> renderedLaneLoopVersions;
-    std::vector<int> renderAllProjectStateQueue;
+    std::vector<RenderAllLaneTarget> renderAllLaneQueue;
+    std::vector<RenderJobStatus> renderJobStatuses;
     size_t renderAllQueueIndex = 0;
-    int renderAllCurrentProjectState = -1;
+    int renderAllCurrentLaneTarget = -1;
+    double renderAllCurrentLaneStartedMs = 0.0;
     int renderAllRenderedLaneCount = 0;
     bool renderAllInProgress = false;
+    bool renderAllCancelRequested = false;
     double orbitConnectionTransportStartMs = 0.0;
     std::vector<float> previousOrbitConnectionPhases;
     bool machinePrepared = false;
@@ -13787,6 +14659,7 @@ private:
     bool loadingProjectInternally = false;
     bool suppressUndoCapture = false;
     bool colourblindSafeMode = false;
+    bool liveSuperColliderOnlyPlayback = false;
     SuperColliderAudioSettings scAudioSettings;
     AudioExportSettings exportSettings;
     juce::String lastProjectSnapshot;
@@ -13795,7 +14668,6 @@ private:
     UndoGroup lastUndoGroup = UndoGroup::structural;
     double lastUndoSnapshotMs = 0.0;
     double lastDirtyMs = 0.0;
-    double lastAutosaveTimerMs = 0.0;
     double visualNextStateMs = 0.0;
     double lastSchedulerStateMs = 0.0;
     double scheduledTransitionTargetMs = 0.0;
@@ -13811,7 +14683,7 @@ class OfApplication final : public juce::JUCEApplication,
 {
 public:
     const juce::String getApplicationName() override { return "of::"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return "0.1.2"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise (const juce::String&) override
@@ -13846,6 +14718,7 @@ private:
         saveProjectAsItem,
         exportAudioItem,
         cancelExportItem,
+        liveSuperColliderOnlyItem,
         welcomeItem,
         settingsItem,
         aboutItem
@@ -13872,6 +14745,11 @@ private:
             menu.addSeparator();
             menu.addItem (exportAudioItem, "Export Audio...");
             menu.addItem (cancelExportItem, "Cancel Export");
+            menu.addSeparator();
+            if (auto* main = mainWindow == nullptr ? nullptr : mainWindow->getMainComponent())
+                menu.addItem (liveSuperColliderOnlyItem, "Live SuperCollider playback only", true, main->isLiveSuperColliderOnlyPlayback());
+            else
+                menu.addItem (liveSuperColliderOnlyItem, "Live SuperCollider playback only", true, false);
             menu.addSeparator();
             menu.addItem (welcomeItem, "Welcome");
             menu.addItem (settingsItem, "Settings...");
@@ -13902,6 +14780,7 @@ private:
             case saveProjectAsItem:  main->saveProjectAs(); break;
             case exportAudioItem:    main->exportAudio(); break;
             case cancelExportItem:   main->cancelAudioExport(); break;
+            case liveSuperColliderOnlyItem: main->toggleLiveSuperColliderOnlyPlayback(); break;
             case welcomeItem:        main->showWelcomePanel(); break;
             case settingsItem:       main->showSettings(); break;
             case aboutItem:          main->showAbout(); break;

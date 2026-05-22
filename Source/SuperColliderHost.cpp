@@ -401,6 +401,8 @@ bool SuperColliderHost::freezeLane (Lane& lane, const juce::String& sclangPath, 
         tempScripts.set (liveSnapshot.id, rawFile);
 
         outputFile.getParentDirectory().createDirectory();
+        if (outputFile.existsAsFile())
+            outputFile.deleteFile();
         sendLoadCommand (lane.id, scriptFile.getFullPathName());
         sendMixCommand (lane.id, lane.volume * lane.gain, lane.pan);
         sendFreezeCommand (lane.id, outputFile.getFullPathName(), durationSeconds);
