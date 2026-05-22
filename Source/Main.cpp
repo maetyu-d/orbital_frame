@@ -65,6 +65,19 @@ juce::Colour graphColour (int index, int offset = 0)
     return paletteColour (index + offset);
 }
 
+juce::String trackDisplayName (const State& state)
+{
+    auto name = state.name;
+    if (name.startsWith ("State "))
+    {
+        const auto suffix = name.fromFirstOccurrenceOf ("State ", false, false).trim();
+        if (suffix.containsOnly ("0123456789") && suffix.getIntValue() > 0)
+            return "Track " + suffix;
+    }
+
+    return name;
+}
+
 juce::Colour transitionColourFor (int index)
 {
     return graphColour (index).interpolatedWith (mutedInk(), 0.54f);
@@ -1093,7 +1106,7 @@ private:
 
             g.setColour (ink());
             g.setFont (juce::FontOptions (stateRadius < 40.0f ? 13.0f : 16.0f, juce::Font::bold));
-            g.drawFittedText (machine->state (i).name, juce::Rectangle<int> (static_cast<int> (p.x - stateRadius * 0.95f),
+            g.drawFittedText (trackDisplayName (machine->state (i)), juce::Rectangle<int> (static_cast<int> (p.x - stateRadius * 0.95f),
                                                                             static_cast<int> (p.y - stateRadius * 0.38f),
                                                                             static_cast<int> (stateRadius * 1.9f), 22),
                               juce::Justification::centred, 1);
@@ -1706,8 +1719,8 @@ public:
         toBox.clear();
         for (int i = 0; i < machine->getStateCount(); ++i)
         {
-            fromBox.addItem (machine->state (i).name, i + 1);
-            toBox.addItem (machine->state (i).name, i + 1);
+            fromBox.addItem (trackDisplayName (machine->state (i)), i + 1);
+            toBox.addItem (trackDisplayName (machine->state (i)), i + 1);
         }
         selectedRuleIndex = selectedRuleIndex >= static_cast<int> (machine->rules.size()) ? -1 : selectedRuleIndex;
 
@@ -1751,11 +1764,11 @@ public:
 
             auto rowArea = row.reduced (8, 0);
             g.setColour (selected ? fromColour.brighter (0.08f) : mutedInk().withAlpha (0.78f));
-            g.drawText (machine->state (r.from).name, rowArea.removeFromLeft (96), juce::Justification::centredLeft);
+            g.drawText (trackDisplayName (machine->state (r.from)), rowArea.removeFromLeft (96), juce::Justification::centredLeft);
             g.setColour (mutedInk().withAlpha (0.72f));
             g.drawText ("->", rowArea.removeFromLeft (24), juce::Justification::centred);
             g.setColour (selected ? toColour.brighter (0.08f) : mutedInk().withAlpha (0.78f));
-            g.drawText (machine->state (r.to).name, rowArea.removeFromLeft (96), juce::Justification::centredLeft);
+            g.drawText (trackDisplayName (machine->state (r.to)), rowArea.removeFromLeft (96), juce::Justification::centredLeft);
             g.setColour (selected ? ink() : mutedInk());
             g.drawText ("w " + juce::String (r.weight, 1), rowArea.removeFromRight (52), juce::Justification::centredRight);
         }
@@ -2536,15 +2549,15 @@ private:
 
         const auto& state = machine->state (hit.stateIndex);
         if (hit.kind == Hit::nestedState)
-            return "Select nested state " + juce::String (hit.detailIndex + 1) + " in " + state.name;
+            return "Select nested track " + juce::String (hit.detailIndex + 1) + " in " + trackDisplayName (state);
         if (hit.kind == Hit::lane)
         {
             if (hit.detailIndex >= 0 && hit.detailIndex < static_cast<int> (state.lanes.size()))
-                return "Select track: " + state.lanes[static_cast<size_t> (hit.detailIndex)].name;
-            return "Select tracks in " + state.name;
+                return "Select lane: " + state.lanes[static_cast<size_t> (hit.detailIndex)].name;
+            return "Select lanes in " + trackDisplayName (state);
         }
         if (hit.kind == Hit::topState)
-            return "Select " + state.name;
+            return "Select " + trackDisplayName (state);
 
         return {};
     }
@@ -2771,7 +2784,7 @@ private:
 
         g.setFont (juce::FontOptions (12.2f, juce::Font::bold));
         g.setColour (selected ? ink() : mutedInk().withAlpha (0.88f));
-        g.drawFittedText (state.name, textArea.removeFromTop (18), juce::Justification::centredLeft, 1, 0.92f);
+        g.drawFittedText (trackDisplayName (state), textArea.removeFromTop (18), juce::Justification::centredLeft, 1, 0.92f);
 
         const auto timing = juce::String (state.tempoBpm, 0) + " BPM  "
                           + juce::String (state.beatsPerBar) + "/" + juce::String (state.beatUnit);
@@ -3987,7 +4000,7 @@ private:
                                             layout.outerRadius * 2.0f, 32.0f).toNearestInt();
         g.setColour ((selected ? ink() : mutedInk()).withAlpha (selected ? 0.94f : 0.68f));
         g.setFont (juce::FontOptions (12.0f, selected ? juce::Font::bold : juce::Font::plain));
-        g.drawFittedText (state.name, text.removeFromTop (18), juce::Justification::centred, 1);
+        g.drawFittedText (trackDisplayName (state), text.removeFromTop (18), juce::Justification::centred, 1);
         g.setColour (mutedInk().withAlpha (0.52f));
         g.setFont (juce::FontOptions (9.8f));
         g.drawFittedText (juce::String (state.tempoBpm, 0) + " BPM  " + juce::String (state.beatsPerBar) + "/" + juce::String (state.beatUnit)
@@ -4881,6 +4894,15 @@ public:
         repaint();
     }
 
+    void clearMachines()
+    {
+        root = nullptr;
+        activeMachine = nullptr;
+        inspectedMachine = nullptr;
+        rows.clear();
+        repaint();
+    }
+
     void paint (juce::Graphics& g) override
     {
         auto bounds = getLocalBounds().toFloat();
@@ -4972,11 +4994,11 @@ private:
 
             const auto& state = model.state (i);
             const auto laneCount = static_cast<int> (state.lanes.size());
-            auto detail = juce::String (laneCount) + (laneCount == 1 ? " trk" : " trks");
+            auto detail = juce::String (laneCount) + (laneCount == 1 ? " lane" : " lanes");
             if (model.hasChildMachine (i))
-                detail = juce::String (model.childMachine (i)->getStateCount()) + " FSM";
+                detail = juce::String (model.childMachine (i)->getStateCount()) + " nested tracks";
 
-            rows.push_back ({ &model, i, depth, state.name, detail, area.removeFromTop (rowHeight) });
+            rows.push_back ({ &model, i, depth, trackDisplayName (state), detail, area.removeFromTop (rowHeight) });
 
             if (auto* child = model.childMachine (i))
                 addRowsForMachine (*child, depth + 1, area);
@@ -5024,6 +5046,15 @@ public:
         selectedIndex = selectedLane;
         clampScroll();
         scrollSelectedIntoView();
+        repaint();
+    }
+
+    void clearState()
+    {
+        state = nullptr;
+        selectedIndex = 0;
+        draggingVolumeIndex = -1;
+        scrollOffset = 0.0f;
         repaint();
     }
 
@@ -5348,6 +5379,18 @@ public:
         selectedIndex = selectedLane;
         transportRunning = running;
         clampScroll();
+        repaint();
+    }
+
+    void clearState()
+    {
+        state = nullptr;
+        selectedIndex = 0;
+        draggingVolumeIndex = -1;
+        draggingGainIndex = -1;
+        draggingPanIndex = -1;
+        transportRunning = false;
+        scrollOffset = 0.0f;
         repaint();
     }
 
@@ -6259,7 +6302,7 @@ public:
         }
 
         exportRangeBox.addItem ("Project cycle", 1);
-        exportRangeBox.addItem ("Selected state", 2);
+        exportRangeBox.addItem ("Selected track", 2);
         exportRangeBox.addItem ("Custom length", 3);
         exportRangeBox.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff111318));
         exportRangeBox.setColour (juce::ComboBox::textColourId, ink());
@@ -6546,7 +6589,7 @@ public:
         destinationEditor.setReadOnly (true);
 
         rangeBox.addItem ("Project cycle", 1);
-        rangeBox.addItem ("Selected state", 2);
+        rangeBox.addItem ("Selected track", 2);
         rangeBox.addItem ("Custom length", 3);
         formatBox.addItem ("16-bit WAV", 1);
         formatBox.addItem ("24-bit WAV", 2);
@@ -6943,6 +6986,10 @@ public:
         addAndMakeVisible (redoButton);
         addAndMakeVisible (logButton);
         addAndMakeVisible (panicButton);
+        addAndMakeVisible (topProjectStateCountLabel);
+        addAndMakeVisible (topProjectStateCountMinus);
+        addAndMakeVisible (topProjectStateCountEditor);
+        addAndMakeVisible (topProjectStateCountPlus);
         addAndMakeVisible (topStateCountLabel);
         addAndMakeVisible (topStateCountMinus);
         addAndMakeVisible (topStateCountEditor);
@@ -6952,7 +6999,7 @@ public:
         addAndMakeVisible (runButton);
         addAndMakeVisible (stepButton);
         addAndMakeVisible (stopAllButton);
-        addAndMakeVisible (rateSlider);
+        addAndMakeVisible (exportAudioButton);
         addChildComponent (graph);
         addAndMakeVisible (orbitCanvas);
         addAndMakeVisible (graphFitButton);
@@ -6963,6 +7010,9 @@ public:
         addAndMakeVisible (rulesTracksDivider);
         addAndMakeVisible (tracksCodeDivider);
         addAndMakeVisible (rightInspectorDivider);
+        addAndMakeVisible (fabricScriptLabel);
+        addAndMakeVisible (fabricScriptEditor);
+        addAndMakeVisible (projectStateTabs);
         addAndMakeVisible (stateTabs);
         addAndMakeVisible (arrangementStrip);
         addAndMakeVisible (navigator);
@@ -7029,6 +7079,30 @@ public:
         breadcrumbLabel.setColour (juce::Label::textColourId, mutedInk());
         breadcrumbLabel.setJustificationType (juce::Justification::centredLeft);
 
+        fabricScriptLabel.setText ("Fabric State Program", juce::dontSendNotification);
+        fabricScriptLabel.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        fabricScriptLabel.setColour (juce::Label::textColourId, accentB().withAlpha (0.86f));
+        fabricScriptLabel.setJustificationType (juce::Justification::centredLeft);
+
+        fabricScriptEditor.setMultiLine (true);
+        fabricScriptEditor.setReturnKeyStartsNewLine (true);
+        fabricScriptEditor.setScrollbarsShown (true);
+        fabricScriptEditor.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+        fabricScriptEditor.setText (fabricStateProgram, false);
+        fabricScriptEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101419).withAlpha (0.96f));
+        fabricScriptEditor.setColour (juce::TextEditor::textColourId, ink());
+        fabricScriptEditor.setColour (juce::TextEditor::outlineColourId, hairline().withAlpha (0.45f));
+        fabricScriptEditor.setColour (juce::TextEditor::focusedOutlineColourId, accentB().withAlpha (0.82f));
+        fabricScriptEditor.setColour (juce::TextEditor::highlightColourId, accentB().withAlpha (0.22f));
+        fabricScriptEditor.onTextChange = [this]
+        {
+            if (updatingFabricScriptEditor)
+                return;
+
+            fabricStateProgram = fabricScriptEditor.getText();
+            markFabricDirty();
+        };
+
         stateSummaryLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         stateSummaryLabel.setColour (juce::Label::textColourId, ink());
         stateSummaryLabel.setJustificationType (juce::Justification::centredLeft);
@@ -7036,9 +7110,9 @@ public:
         freezeStatusLabel.setColour (juce::Label::textColourId, mutedInk());
         freezeStatusLabel.setJustificationType (juce::Justification::centredLeft);
 
-        stateInfoTitle.setText ("State", juce::dontSendNotification);
-        nestedSectionTitle.setText ("Nested FSM", juce::dontSendNotification);
-        trackSectionTitle.setText ("Tracks", juce::dontSendNotification);
+        stateInfoTitle.setText ("Track", juce::dontSendNotification);
+        nestedSectionTitle.setText ("Nested tracks", juce::dontSendNotification);
+        trackSectionTitle.setText ("Lanes", juce::dontSendNotification);
         for (auto* sectionTitle : { &stateInfoTitle, &nestedSectionTitle, &trackSectionTitle })
         {
             sectionTitle->setFont (juce::FontOptions (11.5f, juce::Font::bold));
@@ -7141,12 +7215,12 @@ public:
         codeCheckLabel.setColour (juce::Label::textColourId, mutedInk());
         codeCheckLabel.setJustificationType (juce::Justification::centredLeft);
 
-        trackPaneTitle.setText ("Tracks", juce::dontSendNotification);
+        trackPaneTitle.setText ("Lanes", juce::dontSendNotification);
         trackPaneTitle.setFont (juce::FontOptions (13.5f, juce::Font::bold));
         trackPaneTitle.setColour (juce::Label::textColourId, ink());
         trackPaneTitle.setJustificationType (juce::Justification::centredLeft);
 
-        tracksModeButton.setButtonText ("Tracks");
+        tracksModeButton.setButtonText ("Lanes");
         mixerModeButton.setButtonText ("Mixer");
         tracksModeButton.onClick = [this] { setInspectorMode (InspectorMode::tracks); };
         mixerModeButton.onClick = [this] { setInspectorMode (InspectorMode::mixer); };
@@ -7282,12 +7356,38 @@ public:
             addListener (this, "/of/exportProgress");
         }
         else
-            appendLog ("Could not bind visual state OSC port 57142");
+            appendLog ("Could not bind visual track OSC port 57142");
 
-        topStateCountLabel.setText ("States", juce::dontSendNotification);
-        topStateCountLabel.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-        topStateCountLabel.setColour (juce::Label::textColourId, mutedInk());
-        topStateCountLabel.setJustificationType (juce::Justification::centredLeft);
+        auto configureTopCountLabel = [] (juce::Label& label, const juce::String& text)
+        {
+            label.setText (text, juce::dontSendNotification);
+            label.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            label.setColour (juce::Label::textColourId, mutedInk());
+            label.setJustificationType (juce::Justification::centredLeft);
+        };
+
+        auto configureTopCountEditor = [] (juce::TextEditor& editor)
+        {
+            editor.setInputRestrictions (2, "0123456789");
+            editor.setJustification (juce::Justification::centred);
+            editor.setSelectAllWhenFocused (true);
+            editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff181b20));
+            editor.setColour (juce::TextEditor::textColourId, ink());
+            editor.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff333a44));
+            editor.setColour (juce::TextEditor::focusedOutlineColourId, accentA());
+        };
+
+        configureTopCountLabel (topProjectStateCountLabel, "States");
+        topProjectStateCountMinus.setButtonText ("-");
+        topProjectStateCountPlus.setButtonText ("+");
+        topProjectStateCountMinus.onClick = [this] { setProjectStateCount (projectStateCount - 1); };
+        topProjectStateCountPlus.onClick = [this] { setProjectStateCount (projectStateCount + 1); };
+        topProjectStateCountEditor.setText (juce::String (projectStateCount), false);
+        configureTopCountEditor (topProjectStateCountEditor);
+        topProjectStateCountEditor.onReturnKey = [this] { commitProjectStateCountEditor(); };
+        topProjectStateCountEditor.onFocusLost = [this] { commitProjectStateCountEditor(); };
+
+        configureTopCountLabel (topStateCountLabel, "Tracks");
 
         topStateCountMinus.setButtonText ("-");
         topStateCountPlus.setButtonText ("+");
@@ -7295,21 +7395,15 @@ public:
         topStateCountPlus.onClick = [this] { setTopLevelStateCount (machine.getStateCount() + 1); };
 
         topStateCountEditor.setText (juce::String (machine.getStateCount()), false);
-        topStateCountEditor.setInputRestrictions (2, "0123456789");
-        topStateCountEditor.setJustification (juce::Justification::centred);
-        topStateCountEditor.setSelectAllWhenFocused (true);
-        topStateCountEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff181b20));
-        topStateCountEditor.setColour (juce::TextEditor::textColourId, ink());
-        topStateCountEditor.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff333a44));
-        topStateCountEditor.setColour (juce::TextEditor::focusedOutlineColourId, accentA());
+        configureTopCountEditor (topStateCountEditor);
         topStateCountEditor.onReturnKey = [this] { commitTopLevelStateCountEditor(); };
         topStateCountEditor.onFocusLost = [this] { commitTopLevelStateCountEditor(); };
 
         runButton.setButtonText ("Run");
         stepButton.setButtonText ("Step");
         stopAllButton.setButtonText ("Stop");
-        rateSlider.setRange (0.2, 4.0, 0.1);
-        rateSlider.setValue (0.25);
+        rateSlider.setRange (1.0, 1.0, 0.0);
+        rateSlider.setValue (1.0);
         rateSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 48, 22);
 
         graphFitButton.setButtonText ("Fit");
@@ -7330,6 +7424,7 @@ public:
             if (! fsmRunning)
             {
                 fsmRunning = true;
+                beginFabricRun();
                 if (machinePrepared && ! audioJobRunning)
                     startPreparedRun();
                 else
@@ -7351,6 +7446,8 @@ public:
                 visualNextStateMs = 0.0;
                 scheduledTransitionTargetMs = 0.0;
                 scheduledVisualNextState = -1;
+                ++fabricSchedulerGeneration;
+                currentFabricStartBar = 0.0;
                 runButton.setButtonText ("Run");
             }
         };
@@ -7377,6 +7474,8 @@ public:
             visualNextStateMs = 0.0;
             scheduledTransitionTargetMs = 0.0;
             scheduledVisualNextState = -1;
+            ++fabricSchedulerGeneration;
+            currentFabricStartBar = 0.0;
             refreshControls();
         };
 
@@ -7394,6 +7493,8 @@ public:
             visualNextStateMs = 0.0;
             scheduledTransitionTargetMs = 0.0;
             scheduledVisualNextState = -1;
+            ++fabricSchedulerGeneration;
+            currentFabricStartBar = 0.0;
             refreshControls();
         };
 
@@ -7432,6 +7533,11 @@ public:
             {
                 restartTransport();
             }
+        };
+
+        projectStateTabs.onIndexSelected = [this] (int newIndex)
+        {
+            switchToProjectState (newIndex);
         };
 
         stateTabs.onIndexSelected = [this] (int newIndex)
@@ -7614,13 +7720,14 @@ public:
         refreezeLaneButton.setButtonText ("Refreeze");
         refreezeStaleButton.setButtonText ("All stale");
         renderAllButton.setButtonText ("Render all");
+        exportAudioButton.setButtonText ("Export");
         shapeEditButton.setButtonText ("Edit shape");
         shapeEditButton.setClickingTogglesState (true);
         resetShapeButton.setButtonText ("Reset shape");
         moveLaneUpButton.setButtonText ("^");
         moveLaneDownButton.setButtonText ("v");
-        addChildMachineButton.setButtonText ("+ FSM");
-        removeChildMachineButton.setButtonText ("- FSM");
+        addChildMachineButton.setButtonText ("+ Tracks");
+        removeChildMachineButton.setButtonText ("- Tracks");
         playButton.setButtonText ("Play");
 
         addLaneButton.onClick = [this]
@@ -7653,6 +7760,14 @@ public:
         renderAllButton.onClick = [this]
         {
             renderAllPlacedLanes();
+        };
+
+        exportAudioButton.onClick = [this]
+        {
+            if (exportInProgress)
+                cancelAudioExport();
+            else
+                exportAudio();
         };
 
         shapeEditButton.onClick = [this]
@@ -8045,6 +8160,7 @@ public:
             rules.repaint();
         };
 
+        resetFabricStateProgram();
         refreshControls();
         restoreLastProject();
         resetUndoHistory();
@@ -8080,6 +8196,7 @@ public:
     void newProject()
     {
         fsmRunning = false;
+        ++fabricSchedulerGeneration;
         stopTransport();
         renderedAudioPlayer.stopAll();
         requestAudioProjectReset();
@@ -8089,13 +8206,21 @@ public:
         host.panic (machine);
         runButton.setButtonText ("Run");
 
+        trackList.clearState();
+        mixer.clearState();
+        navigator.clearMachines();
         machine = MachineModel ("root", "", false);
+        projectStateMachines.clear();
         machineStack.clear();
         activeMachine = &machine;
         inspectedMachine = &machine;
         currentProjectFile = juce::File();
+        resetFabricStateProgram();
         laneMeters.clear();
         invalidatePreparedAudio();
+        projectStateCount = maxStateCount;
+        selectedProjectState = 0;
+        ensureProjectStateMachines();
         dirtyProject = false;
         cachedProjectMediaStatus = {};
         lastProjectMediaStatus = "New project";
@@ -8196,6 +8321,8 @@ public:
         }
 
         exportCancelRequested = true;
+        if (activeExportCancelFlag != nullptr)
+            activeExportCancelFlag->store (true);
         statusLabel.setText ("Cancelling export", juce::dontSendNotification);
         host.cancelExport();
     }
@@ -8336,13 +8463,25 @@ public:
         projectFileLabel.setBounds (headerInner.removeFromLeft (132).reduced (2, 2));
         statusLabel.setBounds (headerInner.removeFromLeft (86).reduced (4, 2));
 
-        auto topCountArea = headerInner.removeFromRight (148);
-        topStateCountLabel.setBounds (topCountArea.removeFromLeft (48).reduced (2, 2));
-        topStateCountMinus.setBounds (topCountArea.removeFromLeft (26).reduced (2, 0));
-        topStateCountEditor.setBounds (topCountArea.removeFromLeft (36).reduced (2, 0));
-        topStateCountPlus.setBounds (topCountArea.removeFromLeft (26).reduced (2, 0));
+        auto setCountControlBounds = [] (juce::Rectangle<int> controlArea,
+                                         juce::Label& label,
+                                         juce::TextButton& minus,
+                                         juce::TextEditor& editor,
+                                         juce::TextButton& plus)
+        {
+            label.setBounds (controlArea.removeFromLeft (48).reduced (2, 2));
+            minus.setBounds (controlArea.removeFromLeft (26).reduced (2, 0));
+            editor.setBounds (controlArea.removeFromLeft (36).reduced (2, 0));
+            plus.setBounds (controlArea.removeFromLeft (26).reduced (2, 0));
+        };
+
+        auto topTrackCountArea = headerInner.removeFromRight (148);
+        setCountControlBounds (topTrackCountArea, topStateCountLabel, topStateCountMinus, topStateCountEditor, topStateCountPlus);
         headerInner.removeFromRight (8);
-        rateSlider.setBounds (headerInner.removeFromRight (122).reduced (4, 0));
+        auto topProjectStateCountArea = headerInner.removeFromRight (148);
+        setCountControlBounds (topProjectStateCountArea, topProjectStateCountLabel, topProjectStateCountMinus, topProjectStateCountEditor, topProjectStateCountPlus);
+        headerInner.removeFromRight (8);
+        rateSlider.setBounds ({});
 
         auto buttonRow = headerInner;
         const auto headerControlWidth = buttonRow.getWidth();
@@ -8376,6 +8515,7 @@ public:
         addButton (panicButton, compact ? 66 : 74);
         addGap (7);
         addButton (renderAllButton, tiny ? 68 : (compact ? 82 : 94));
+        addButton (exportAudioButton, tiny ? 58 : (compact ? 66 : 76));
         addGap (5);
         addButton (loadProjectButton, compact ? 52 : 62);
         addButton (saveProjectButton, compact ? 52 : 62);
@@ -8401,7 +8541,9 @@ public:
 
         const auto horizontalDividerHeight = 8;
         constexpr int compactArrangementHeight = 108;
-        const auto topWorkspaceHeight = 36;
+        const auto projectStateStripHeight = 34;
+        const auto trackStripHeight = 36;
+        const auto topWorkspaceHeight = projectStateStripHeight + trackStripHeight;
         const auto minGraphHeight = codeExpanded ? 112 : 300;
         const auto minBottomHeight = codeExpanded ? 320 : 150;
         const auto maxBottomHeight = juce::jmax (minBottomHeight, area.getHeight() - topWorkspaceHeight - minGraphHeight - horizontalDividerHeight);
@@ -8441,12 +8583,17 @@ public:
         rulesPaneWidth = juce::jlimit (minRules, maxRules, rulesPaneWidth);
 
         auto bottom = lower;
-        auto rulesPane = bottom.removeFromLeft (rulesPaneWidth);
+        auto fabricPane = bottom.removeFromLeft (rulesPaneWidth);
         auto dividerA = bottom.removeFromLeft (dividerWidth);
         auto codePane = bottom;
 
-        rules.setBounds (rulesPane);
+        rules.setVisible (false);
+        rules.setBounds ({});
         rulesTracksDivider.setBounds (dividerA);
+        auto fabricPaneInner = fabricPane.reduced (8, 0);
+        auto fabricHeader = fabricPaneInner.removeFromTop (34);
+        fabricScriptLabel.setBounds (fabricHeader.reduced (3));
+        fabricScriptEditor.setBounds (fabricPaneInner.reduced (0, 6));
 
         auto inspectorArea = tracksPane.reduced (10, 8);
         const auto rightDividerHeight = 8;
@@ -8583,7 +8730,8 @@ public:
         codeCheckLabel.setBounds (codeHeader.reduced (3));
         scriptEditor.setBounds (codePaneInner.reduced (0, 6));
 
-        stateTabs.setBounds (workspace.removeFromTop (36));
+        projectStateTabs.setBounds (workspace.removeFromTop (projectStateStripHeight));
+        stateTabs.setBounds (workspace.removeFromTop (trackStripHeight));
 
         auto graphArea = workspace.reduced (0, 10);
         if (logVisible)
@@ -8949,8 +9097,8 @@ private:
         scheduledTransitionTargetMs = juce::Time::getMillisecondCounterHiRes() + static_cast<double> (durationSeconds) * 1000.0;
         visualNextStateMs = scheduledTransitionTargetMs;
         appendLog ("Scheduled visual: "
-                   + (fromState >= 0 && fromState < machine.getStateCount() ? machine.state (fromState).name : juce::String ("?"))
-                   + " -> " + machine.state (nextState).name
+                   + (fromState >= 0 && fromState < machine.getStateCount() ? trackDisplayName (machine.state (fromState)) : juce::String ("?"))
+                   + " -> " + trackDisplayName (machine.state (nextState))
                    + " in " + juce::String (durationSeconds, 3) + "s");
         graph.setTransitionPreview (nextState, 1.0f);
         graph.repaint();
@@ -8962,22 +9110,29 @@ private:
         if (message.size() < 2 || ! message[0].isString() || ! message[1].isString())
             return;
 
-        auto* lane = findLaneById (machine, message[0].getString());
-        if (lane == nullptr)
+        const auto laneId = message[0].getString();
+        const auto frozenPath = message[1].getString();
+        const auto hasSignal = renderedAudioFileHasSignal (frozenPath);
+        auto updated = hasSignal ? updateFrozenLaneById (machine, laneId, frozenPath)
+                                 : markFrozenLaneRenderFailedById (machine, laneId, frozenPath);
+
+        ensureProjectStateMachines();
+        for (int i = 0; i < projectStateCount; ++i)
+            if (projectStateMachines[static_cast<size_t> (i)] != nullptr)
+                updated = (hasSignal ? updateFrozenLaneById (*projectStateMachines[static_cast<size_t> (i)], laneId, frozenPath)
+                                     : markFrozenLaneRenderFailedById (*projectStateMachines[static_cast<size_t> (i)], laneId, frozenPath)) || updated;
+
+        if (! updated)
             return;
 
-        lane->frozen = true;
-        lane->freezeStale = false;
-        lane->freezeInProgress = false;
-        lane->frozenAudioPath = message[1].getString();
-        if (lane->frozenDurationSeconds <= 0.0)
-            lane->frozenDurationSeconds = laneRenderDurationSeconds (machine.state (machine.selectedState), *lane) / juce::jmax (0.05, rateSlider.getValue());
-        lane->preparedBridge = -1;
-        statusLabel.setText ("Freeze ready", juce::dontSendNotification);
+        statusLabel.setText (hasSignal ? "Freeze ready" : "Freeze was silent", juce::dontSendNotification);
+        if (! hasSignal)
+            appendLog ("Silent render kept stale: " + laneId + " -> " + frozenPath);
         orbitCanvas.invalidateWaveforms();
         markMachineDirty (UndoGroup::continuous);
         refreshProjectMediaStatus();
         refreshControls();
+        continueQueuedRenderAllIfReady();
     }
 
     void handleExportedMessage (const juce::OSCMessage& message)
@@ -8992,6 +9147,7 @@ private:
         audioJobRunning = false;
         exportInProgress = false;
         exportCancelRequested = false;
+        activeExportCancelFlag = nullptr;
         exportElapsedSeconds = 0.0;
         exportTotalSeconds = 0.0;
         statusLabel.setText (ok ? "Audio exported" : (cancelled ? "Audio export cancelled" : "Audio export failed"), juce::dontSendNotification);
@@ -9483,9 +9639,24 @@ private:
         auto object = new juce::DynamicObject();
         object->setProperty ("format", "of:: Project");
         object->setProperty ("version", 1);
-        object->setProperty ("rate", rateSlider.getValue());
+        object->setProperty ("rate", 1.0);
         object->setProperty ("masterGain", masterGainSlider.getValue());
+        object->setProperty ("projectStateCount", projectStateCount);
+        object->setProperty ("selectedProjectState", selectedProjectState);
+        object->setProperty ("fabricStateProgram", fabricStateProgram);
         object->setProperty ("machine", machineToProjectVar (machine));
+
+        juce::Array<juce::var> projectStates;
+        for (int i = 0; i < projectStateCount; ++i)
+        {
+            if (i == selectedProjectState)
+                projectStates.add (machineToProjectVar (machine));
+            else if (i >= 0 && i < static_cast<int> (projectStateMachines.size()) && projectStateMachines[static_cast<size_t> (i)] != nullptr)
+                projectStates.add (machineToProjectVar (*projectStateMachines[static_cast<size_t> (i)]));
+            else
+                projectStates.add (machineToProjectVar (*makeBlankProjectStateMachine (i)));
+        }
+        object->setProperty ("projectStates", projectStates);
         return object;
     }
 
@@ -9591,20 +9762,16 @@ private:
         host.panic (machine);
         runButton.setButtonText ("Run");
 
-        machine = std::move (loadedMachine);
-
-        const auto rate = static_cast<double> (parsed.getProperty ("rate", rateSlider.getValue()));
-        rateSlider.setValue (juce::jlimit (0.2, 4.0, rate), juce::dontSendNotification);
+        rateSlider.setValue (1.0, juce::dontSendNotification);
+        projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", maxStateCount)));
+        selectedProjectState = juce::jlimit (0, projectStateCount - 1, static_cast<int> (parsed.getProperty ("selectedProjectState", 0)));
+        loadProjectStateMachinesFromProjectVar (parsed, loadedMachine);
+        loadFabricStateProgramFromProjectVar (parsed);
+        loadProjectStateFromStore (selectedProjectState);
         const auto masterGain = juce::jlimit (0.0, 5.0, static_cast<double> (parsed.getProperty ("masterGain", masterGainSlider.getValue())));
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
         renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
-        machineStack.clear();
-        activeMachine = &machine;
-        inspectedMachine = &machine;
-        graph.setMachine (machine);
-        graph.setInspectedMachine (&machine);
-        rules.setMachine (machine);
         laneMeters.clear();
         invalidatePreparedAudio();
         topStateCountEditor.setText (juce::String (machine.getStateCount()), false);
@@ -9727,7 +9894,7 @@ private:
             const auto stateVar = statesArray->getReference (i);
             auto& state = model.state (i);
             state.index = i;
-            state.name = stateVar.getProperty ("name", "State " + juce::String (i + 1)).toString();
+            state.name = stateVar.getProperty ("name", "Track " + juce::String (i + 1)).toString();
             state.tempoBpm = juce::jlimit (20.0, 320.0, static_cast<double> (stateVar.getProperty ("tempoBpm", 120.0)));
             state.beatsPerBar = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatsPerBar", 4)));
             state.beatUnit = juce::jlimit (1, 32, static_cast<int> (stateVar.getProperty ("beatUnit", 4)));
@@ -9825,6 +9992,144 @@ private:
         return true;
     }
 
+    std::unique_ptr<MachineModel> makeBlankProjectStateMachine (int projectStateIndex) const
+    {
+        auto blank = std::make_unique<MachineModel> ("root", "", false);
+        blank->machineId = "state_" + juce::String (projectStateIndex + 1);
+        blank->lanePrefix = "st" + juce::String (projectStateIndex + 1) + "-";
+        blank->selectedState = 0;
+        blank->selectedLane = 0;
+        blank->entryState = 0;
+        if (blank->getStateCount() > 0)
+            blank->state (0).name = "Track 1";
+        return blank;
+    }
+
+    std::unique_ptr<MachineModel> cloneProjectStateMachine (const MachineModel& source)
+    {
+        auto clone = std::make_unique<MachineModel> ("root", "", false);
+        if (! machineFromProjectVar (*clone, machineToProjectVar (source)))
+            return makeBlankProjectStateMachine (0);
+        return clone;
+    }
+
+    void ensureProjectStateMachines()
+    {
+        projectStateCount = juce::jlimit (1, maxStateCount, projectStateCount);
+        if (projectStateMachines.size() < static_cast<size_t> (maxStateCount))
+            projectStateMachines.resize (static_cast<size_t> (maxStateCount));
+
+        for (int i = 0; i < projectStateCount; ++i)
+            if (projectStateMachines[static_cast<size_t> (i)] == nullptr)
+                projectStateMachines[static_cast<size_t> (i)] = makeBlankProjectStateMachine (i);
+    }
+
+    void syncCurrentProjectStateToStore()
+    {
+        ensureProjectStateMachines();
+        if (selectedProjectState >= 0 && selectedProjectState < projectStateCount)
+            projectStateMachines[static_cast<size_t> (selectedProjectState)] = cloneProjectStateMachine (machine);
+    }
+
+    void activateLiveProjectStateMachine (MachineModel&& nextMachine)
+    {
+        trackList.clearState();
+        mixer.clearState();
+        navigator.clearMachines();
+
+        machine = std::move (nextMachine);
+        machineStack.clear();
+        activeMachine = &machine;
+        inspectedMachine = &machine;
+        selectedRenderedWaveformState = -1;
+        selectedRenderedWaveformLane = -1;
+        orbitFocusedTrack = -1;
+        laneMeters.clear();
+        invalidatePreparedAudio();
+        graph.setMachine (machine);
+        graph.setInspectedMachine (&machine);
+        rules.setMachine (machine);
+        navigator.setMachines (machine, activeMachine, inspectedMachine);
+        topStateCountEditor.setText (juce::String (machine.getStateCount()), false);
+
+        if (machine.getStateCount() > 0)
+        {
+            machine.selectedState = juce::jlimit (0, machine.getStateCount() - 1, machine.selectedState);
+            machine.selectedLane = juce::jlimit (0, juce::jmax (0, machine.getLaneCount (machine.selectedState) - 1), machine.selectedLane);
+            auto& selectedTrack = machine.state (machine.selectedState);
+            trackList.setState (selectedTrack, machine.selectedLane);
+            mixer.setState (selectedTrack, machine.selectedLane, fsmRunning);
+        }
+    }
+
+    void loadProjectStateFromStore (int index)
+    {
+        ensureProjectStateMachines();
+        index = juce::jlimit (0, projectStateCount - 1, index);
+
+        auto next = projectStateMachines[static_cast<size_t> (index)] != nullptr
+            ? cloneProjectStateMachine (*projectStateMachines[static_cast<size_t> (index)])
+            : makeBlankProjectStateMachine (index);
+
+        activateLiveProjectStateMachine (std::move (*next));
+    }
+
+    void loadProjectStateMachinesFromProjectVar (const juce::var& parsed, const MachineModel& fallbackMachine)
+    {
+        projectStateMachines.clear();
+        projectStateMachines.resize (static_cast<size_t> (maxStateCount));
+        ensureProjectStateMachines();
+
+        if (auto* stateArray = parsed.getProperty ("projectStates", {}).getArray())
+        {
+            const auto count = juce::jmin (projectStateCount, stateArray->size());
+            for (int i = 0; i < count; ++i)
+            {
+                auto loaded = makeBlankProjectStateMachine (i);
+                if (machineFromProjectVar (*loaded, stateArray->getReference (i)))
+                    projectStateMachines[static_cast<size_t> (i)] = std::move (loaded);
+            }
+        }
+        else
+        {
+            const auto fallbackIndex = juce::jlimit (0, projectStateCount - 1, selectedProjectState);
+            projectStateMachines[static_cast<size_t> (fallbackIndex)] = cloneProjectStateMachine (fallbackMachine);
+        }
+
+        ensureProjectStateMachines();
+    }
+
+    juce::String defaultFabricStateProgram() const
+    {
+        return "start state 1 from bar 0\n"
+               "after 2 bars -> state 2 from bar 0\n"
+               "after 15 seconds -> state 4 from bar 1\n"
+               "after 15 seconds -> state 3 from bar 1\n"
+               "after 4 bars -> random state 5..6 from bar 0\n"
+               "play selected for 60 seconds\n"
+               "fade out over 30 seconds\n";
+    }
+
+    void resetFabricStateProgram()
+    {
+        selectedProjectState = 0;
+        fabricStateProgram = defaultFabricStateProgram();
+        loadFabricStateProgramIntoEditor();
+    }
+
+    void loadFabricStateProgramFromProjectVar (const juce::var& parsed)
+    {
+        resetFabricStateProgram();
+        selectedProjectState = juce::jlimit (0, projectStateCount - 1,
+                                             static_cast<int> (parsed.getProperty ("selectedProjectState", 0)));
+        fabricStateProgram = parsed.getProperty ("fabricStateProgram", fabricStateProgram).toString();
+
+        if (fabricStateProgram.trim().isEmpty())
+            fabricStateProgram = defaultFabricStateProgram();
+
+        loadFabricStateProgramIntoEditor();
+    }
+
     bool loadProjectFromFile (const juce::File& file, bool rememberProject = true)
     {
         auto parsed = juce::JSON::parse (file);
@@ -9840,6 +10145,10 @@ private:
             const juce::ScopedValueSetter<juce::File> mediaBase (loadingProjectDirectory, file.getParentDirectory());
             if (! machineFromProjectVar (loadedMachine, machineVar))
                 return false;
+            projectStateCount = juce::jlimit (1, maxStateCount, static_cast<int> (parsed.getProperty ("projectStateCount", maxStateCount)));
+            selectedProjectState = juce::jlimit (0, projectStateCount - 1, static_cast<int> (parsed.getProperty ("selectedProjectState", 0)));
+            loadProjectStateMachinesFromProjectVar (parsed, loadedMachine);
+            loadFabricStateProgramFromProjectVar (parsed);
         }
 
         fsmRunning = false;
@@ -9850,20 +10159,13 @@ private:
         host.pauseMachine();
         host.panic (machine);
         runButton.setButtonText ("Run");
-        machine = std::move (loadedMachine);
 
-        const auto rate = static_cast<double> (parsed.getProperty ("rate", rateSlider.getValue()));
-        rateSlider.setValue (juce::jlimit (0.2, 4.0, rate), juce::dontSendNotification);
+        rateSlider.setValue (1.0, juce::dontSendNotification);
+        loadProjectStateFromStore (selectedProjectState);
         const auto masterGain = juce::jlimit (0.0, 5.0, static_cast<double> (parsed.getProperty ("masterGain", masterGainSlider.getValue())));
         masterGainSlider.setValue (masterGain, juce::dontSendNotification);
         host.setMasterGain (static_cast<float> (masterGain));
         renderedAudioPlayer.setMasterGain (static_cast<float> (masterGain));
-        machineStack.clear();
-        activeMachine = &machine;
-        inspectedMachine = &machine;
-        graph.setMachine (machine);
-        graph.setInspectedMachine (&machine);
-        rules.setMachine (machine);
         laneMeters.clear();
         invalidatePreparedAudio();
         if (rememberProject)
@@ -9968,6 +10270,213 @@ private:
                                      });
     }
 
+    struct OfflineRenderedLane
+    {
+        juce::String name;
+        juce::String audioPath;
+        double trackSeconds = 1.0;
+        double laneSeconds = 1.0;
+        double startPhase = 0.0;
+        double fadeInSeconds = 0.0;
+        double fadeOutSeconds = 0.0;
+        float gain = 1.0f;
+        float pan = 0.0f;
+    };
+
+    std::vector<OfflineRenderedLane> collectOfflineRenderedLanes (double rate) const
+    {
+        std::vector<OfflineRenderedLane> result;
+        const auto safeRate = juce::jmax (0.05, rate);
+
+        for (const auto& state : machine.states)
+        {
+            const auto trackSeconds = juce::jmax (0.05, state.secondsPerSection() / safeRate);
+            const auto anySolo = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
+            {
+                return lane.enabled && lane.solo;
+            });
+
+            for (const auto& lane : state.lanes)
+            {
+                if (! lane.enabled || lane.muted || (anySolo && ! lane.solo))
+                    continue;
+
+                if (! lane.frozen || lane.freezeStale || lane.frozenAudioPath.isEmpty())
+                    continue;
+
+                const auto file = currentProjectFile.existsAsFile()
+                    ? resolveProjectMediaFile (lane.frozenAudioPath, currentProjectFile)
+                    : juce::File (lane.frozenAudioPath);
+                if (! file.existsAsFile())
+                    continue;
+
+                OfflineRenderedLane item;
+                item.name = trackDisplayName (state) + " / " + lane.name;
+                item.audioPath = file.getFullPathName();
+                item.trackSeconds = trackSeconds;
+                item.laneSeconds = juce::jmax (0.01, laneRenderDurationSeconds (state, lane) / safeRate);
+                item.startPhase = juce::jlimit (0.0, 0.9999, static_cast<double> (lane.orbitPhase));
+                item.fadeInSeconds = juce::jmax (0.0, lane.fadeInSeconds);
+                item.fadeOutSeconds = juce::jmax (0.0, lane.fadeOutSeconds);
+                item.gain = juce::jlimit (0.0f, 10.0f, lane.volume * lane.gain * static_cast<float> (masterGainSlider.getValue()));
+                item.pan = juce::jlimit (-1.0f, 1.0f, lane.pan);
+                result.push_back (std::move (item));
+            }
+        }
+
+        return result;
+    }
+
+    static int bitsForExportFormat (const juce::String& sampleFormat)
+    {
+        if (sampleFormat == "int24")
+            return 24;
+
+        if (sampleFormat == "float")
+            return 32;
+
+        return 16;
+    }
+
+    static bool exportRenderedLanesToWav (const std::vector<OfflineRenderedLane>& lanes,
+                                          const juce::File& outputFile,
+                                          double durationSeconds,
+                                          const juce::String& sampleFormat,
+                                          const std::shared_ptr<std::atomic<bool>>& cancelRequested)
+    {
+        if (lanes.empty())
+            return false;
+
+        juce::AudioFormatManager formatManager;
+        formatManager.registerBasicFormats();
+
+        struct Source
+        {
+            OfflineRenderedLane lane;
+            juce::AudioBuffer<float> buffer;
+            double sampleRate = 44100.0;
+        };
+
+        std::vector<Source> sources;
+        for (const auto& lane : lanes)
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (juce::File (lane.audioPath)));
+            if (reader == nullptr || reader->lengthInSamples <= 0)
+                continue;
+
+            Source source;
+            source.lane = lane;
+            source.sampleRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
+            source.buffer.setSize (static_cast<int> (juce::jmax<juce::uint32> (1, reader->numChannels)),
+                                   static_cast<int> (juce::jmin<juce::int64> (reader->lengthInSamples, std::numeric_limits<int>::max())));
+            reader->read (&source.buffer, 0, source.buffer.getNumSamples(), 0, true, true);
+            sources.push_back (std::move (source));
+        }
+
+        if (sources.empty())
+            return false;
+
+        outputFile.getParentDirectory().createDirectory();
+        outputFile.deleteFile();
+
+        constexpr double exportSampleRate = 44100.0;
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::FileOutputStream> stream (outputFile.createOutputStream());
+        if (stream == nullptr || ! stream->openedOk())
+            return false;
+
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(),
+                                                                              exportSampleRate,
+                                                                              2,
+                                                                              bitsForExportFormat (sampleFormat),
+                                                                              {},
+                                                                              0));
+        if (writer == nullptr)
+            return false;
+
+        stream.release();
+
+        const auto totalSamples = static_cast<juce::int64> (juce::jlimit (1.0, 1800.0, durationSeconds) * exportSampleRate + 0.5);
+        constexpr int blockSize = 8192;
+        juce::AudioBuffer<float> block (2, blockSize);
+
+        for (juce::int64 blockStart = 0; blockStart < totalSamples && (cancelRequested == nullptr || ! cancelRequested->load()); blockStart += blockSize)
+        {
+            const auto samplesThisBlock = static_cast<int> (juce::jmin<juce::int64> (blockSize, totalSamples - blockStart));
+            block.clear();
+
+            for (const auto& source : sources)
+            {
+                const auto& lane = source.lane;
+                const auto sourceSamples = source.buffer.getNumSamples();
+                if (sourceSamples <= 0 || lane.trackSeconds <= 0.0)
+                    continue;
+
+                const auto eventStartSeconds = lane.startPhase * lane.trackSeconds;
+                const auto blockStartSeconds = static_cast<double> (blockStart) / exportSampleRate;
+                const auto blockEndSeconds = static_cast<double> (blockStart + samplesThisBlock) / exportSampleRate;
+                const auto repeatStart = static_cast<int> (std::floor ((blockStartSeconds - eventStartSeconds - lane.laneSeconds) / lane.trackSeconds));
+                const auto repeatEnd = static_cast<int> (std::ceil ((blockEndSeconds - eventStartSeconds) / lane.trackSeconds));
+
+                for (int repeat = repeatStart; repeat <= repeatEnd; ++repeat)
+                {
+                    const auto startSeconds = eventStartSeconds + static_cast<double> (repeat) * lane.trackSeconds;
+                    const auto endSeconds = startSeconds + lane.laneSeconds;
+                    if (endSeconds <= blockStartSeconds || startSeconds >= blockEndSeconds)
+                        continue;
+
+                    const auto first = juce::jlimit (0, samplesThisBlock - 1,
+                                                     static_cast<int> (std::floor ((juce::jmax (startSeconds, blockStartSeconds) - blockStartSeconds) * exportSampleRate)));
+                    const auto last = juce::jlimit (0, samplesThisBlock,
+                                                    static_cast<int> (std::ceil ((juce::jmin (endSeconds, blockEndSeconds) - blockStartSeconds) * exportSampleRate)));
+
+                    for (int i = first; i < last; ++i)
+                    {
+                        const auto absoluteSeconds = static_cast<double> (blockStart + i) / exportSampleRate;
+                        const auto laneTime = absoluteSeconds - startSeconds;
+                        if (laneTime < 0.0 || laneTime >= lane.laneSeconds)
+                            continue;
+
+                        const auto sourcePosition = laneTime * source.sampleRate;
+                        const auto sourceIndex = static_cast<int> (sourcePosition);
+                        if (sourceIndex < 0 || sourceIndex >= sourceSamples)
+                            continue;
+
+                        const auto nextIndex = juce::jmin (sourceSamples - 1, sourceIndex + 1);
+                        const auto alpha = static_cast<float> (sourcePosition - static_cast<double> (sourceIndex));
+                        const auto sourceLeft = source.buffer.getSample (0, sourceIndex);
+                        const auto left = sourceLeft + (source.buffer.getSample (0, nextIndex) - sourceLeft) * alpha;
+                        const auto rightChannel = source.buffer.getNumChannels() > 1 ? 1 : 0;
+                        const auto sourceRight = source.buffer.getSample (rightChannel, sourceIndex);
+                        const auto right = sourceRight + (source.buffer.getSample (rightChannel, nextIndex) - sourceRight) * alpha;
+                        auto fade = 1.0f;
+                        if (lane.fadeInSeconds > 0.0)
+                            fade = juce::jmin (fade, juce::jlimit (0.0f, 1.0f, static_cast<float> (laneTime / lane.fadeInSeconds)));
+                        if (lane.fadeOutSeconds > 0.0)
+                            fade = juce::jmin (fade, juce::jlimit (0.0f, 1.0f, static_cast<float> ((lane.laneSeconds - laneTime) / lane.fadeOutSeconds)));
+
+                        const auto leftGain = lane.gain * fade * (lane.pan <= 0.0f ? 1.0f : 1.0f - lane.pan);
+                        const auto rightGain = lane.gain * fade * (lane.pan >= 0.0f ? 1.0f : 1.0f + lane.pan);
+                        block.addSample (0, i, left * leftGain);
+                        block.addSample (1, i, right * rightGain);
+                    }
+                }
+            }
+
+            writer->writeFromAudioSampleBuffer (block, 0, samplesThisBlock);
+        }
+
+        writer.reset();
+
+        if (cancelRequested != nullptr && cancelRequested->load())
+        {
+            outputFile.deleteFile();
+            return false;
+        }
+
+        return true;
+    }
+
     juce::File defaultAudioExportFile() const
     {
         auto base = currentProjectFile.existsAsFile()
@@ -10049,6 +10558,9 @@ private:
         const auto startState = machine.selectedState;
         const auto sampleFormat = exportSettings.sampleFormat;
         const auto path = getSclangPathOverride();
+        const auto renderedLanes = collectOfflineRenderedLanes (rate);
+        auto cancelFlag = std::make_shared<std::atomic<bool>> (false);
+        activeExportCancelFlag = cancelFlag;
         exportInProgress = true;
         exportCancelRequested = false;
         exportElapsedSeconds = 0.0;
@@ -10057,22 +10569,40 @@ private:
         statusLabel.setText ("Exporting WAV", juce::dontSendNotification);
 
         auto safeThis = juce::Component::SafePointer<MainComponent> (this);
-        juce::Thread::launch ([safeThis, outputFile, duration, rate, startState, sampleFormat, path]
+        juce::Thread::launch ([safeThis, outputFile, duration, rate, startState, sampleFormat, path, renderedLanes, cancelFlag]
         {
             if (safeThis == nullptr)
                 return;
 
-            const auto ok = safeThis->host.exportMachine (safeThis->machine, path, outputFile, duration, rate, startState, sampleFormat);
-            juce::MessageManager::callAsync ([safeThis, ok, outputFile]
+            const auto usedRenderedExport = ! renderedLanes.empty();
+            const auto ok = usedRenderedExport
+                ? MainComponent::exportRenderedLanesToWav (renderedLanes, outputFile, duration, sampleFormat, cancelFlag)
+                : safeThis->host.exportMachine (safeThis->machine, path, outputFile, duration, rate, startState, sampleFormat);
+            juce::MessageManager::callAsync ([safeThis, ok, outputFile, usedRenderedExport, cancelFlag]
             {
                 if (safeThis == nullptr)
                     return;
 
-                if (! ok)
+                if (usedRenderedExport)
                 {
                     safeThis->audioJobRunning = false;
                     safeThis->exportInProgress = false;
                     safeThis->exportCancelRequested = false;
+                    if (safeThis->activeExportCancelFlag == cancelFlag)
+                        safeThis->activeExportCancelFlag = nullptr;
+                    safeThis->exportElapsedSeconds = 0.0;
+                    safeThis->exportTotalSeconds = 0.0;
+                    safeThis->statusLabel.setText (ok ? "Audio exported" : "Audio export cancelled", juce::dontSendNotification);
+                    safeThis->appendLog ((ok ? "Rendered WAV exported: " : "Rendered WAV export cancelled: ") + outputFile.getFullPathName());
+                    safeThis->refreshControls();
+                }
+                else if (! ok)
+                {
+                    safeThis->audioJobRunning = false;
+                    safeThis->exportInProgress = false;
+                    safeThis->exportCancelRequested = false;
+                    if (safeThis->activeExportCancelFlag == cancelFlag)
+                        safeThis->activeExportCancelFlag = nullptr;
                     safeThis->statusLabel.setText ("Audio export failed", juce::dontSendNotification);
                     safeThis->appendLog ("Audio export failed: " + outputFile.getFullPathName());
                 }
@@ -10128,14 +10658,14 @@ private:
         const auto now = juce::Time::getMillisecondCounterHiRes();
         const auto driftMs = now - scheduledTransitionTargetMs;
         appendLog ("Transition drift: planned "
-                   + (scheduledVisualFromState >= 0 ? machine.state (scheduledVisualFromState).name : juce::String ("?"))
+                   + (scheduledVisualFromState >= 0 ? trackDisplayName (machine.state (scheduledVisualFromState)) : juce::String ("?"))
                    + " -> "
                    + (scheduledVisualNextState >= 0 && scheduledVisualNextState < machine.getStateCount()
-                        ? machine.state (scheduledVisualNextState).name
+                        ? trackDisplayName (machine.state (scheduledVisualNextState))
                         : juce::String ("?"))
                    + ", confirmed "
                    + (confirmedState >= 0 && confirmedState < machine.getStateCount()
-                        ? machine.state (confirmedState).name
+                        ? trackDisplayName (machine.state (confirmedState))
                         : juce::String ("?"))
                    + ", drift " + juce::String (driftMs, 1) + " ms");
 
@@ -10418,9 +10948,9 @@ private:
     juce::String makeBreadcrumb() const
     {
         juce::StringArray parts;
-        parts.add ("Top FSM");
+        parts.add ("State " + juce::String (selectedProjectState + 1));
         addBreadcrumbParts (&machine, inspectedMachine, parts);
-        parts.add (currentInspectorMachine().state (currentInspectorMachine().selectedState).name);
+        parts.add (trackDisplayName (currentInspectorMachine().state (currentInspectorMachine().selectedState)));
         return parts.joinIntoString (" / ");
     }
 
@@ -10433,7 +10963,7 @@ private:
         {
             if (auto* child = model->childMachine (i))
             {
-                parts.add (model->state (i).name + " FSM");
+                parts.add (trackDisplayName (model->state (i)) + " nested tracks");
                 if (addBreadcrumbParts (child, target, parts))
                     return true;
                 parts.remove (parts.size() - 1);
@@ -10449,15 +10979,303 @@ private:
         const auto& s = inspected.state (inspected.selectedState);
         const auto laneCount = static_cast<int> (s.lanes.size());
         auto activeText = (&inspected == activeMachine) ? "active" : "inspecting";
-        const auto nestedText = inspected.hasChildMachine (inspected.selectedState) ? "nested FSM" : "no nested FSM";
+        const auto nestedText = inspected.hasChildMachine (inspected.selectedState) ? "nested tracks" : "no nested tracks";
         const auto durationText = s.durationUsesSeconds
             ? juce::String (s.durationSeconds, 1) + " sec"
             : juce::String (s.arrangementBars) + "b " + juce::String (s.arrangementBeats) + "bt";
-        return s.name + "  |  " + juce::String (laneCount) + (laneCount == 1 ? " track" : " tracks")
+        return trackDisplayName (s) + "  |  " + juce::String (laneCount) + (laneCount == 1 ? " lane" : " lanes")
              + "  |  " + juce::String (s.tempoBpm, 1) + " BPM"
              + "  |  " + juce::String (s.beatsPerBar) + "/" + juce::String (s.beatUnit)
              + "  |  " + durationText
              + "  |  " + activeText + "  |  " + nestedText;
+    }
+
+    void loadFabricStateProgramIntoEditor()
+    {
+        const juce::ScopedValueSetter<bool> guard (updatingFabricScriptEditor, true);
+        fabricScriptEditor.setText (fabricStateProgram, false);
+        fabricScriptLabel.setText ("Fabric State Program", juce::dontSendNotification);
+    }
+
+    void refreshProjectStateTabs()
+    {
+        projectStateCount = juce::jlimit (1, maxStateCount, projectStateCount);
+        selectedProjectState = juce::jlimit (0, projectStateCount - 1, selectedProjectState);
+        juce::StringArray names;
+        for (int i = 0; i < projectStateCount; ++i)
+            names.add ("State " + juce::String (i + 1));
+
+        projectStateTabs.setItems (names, selectedProjectState);
+    }
+
+    void commitProjectStateCountEditor()
+    {
+        setProjectStateCount (topProjectStateCountEditor.getText().getIntValue());
+    }
+
+    void switchToProjectState (int newIndex)
+    {
+        newIndex = juce::jlimit (0, projectStateCount - 1, newIndex);
+        if (newIndex == selectedProjectState)
+        {
+            refreshProjectStateTabs();
+            return;
+        }
+
+        fsmRunning = false;
+        stopTransport();
+        renderedAudioPlayer.stopAll();
+        host.stopAll (machine);
+        runButton.setButtonText ("Run");
+        ++playbackGeneration;
+        renderedLaneLoopVersions.clear();
+
+        syncCurrentProjectStateToStore();
+        selectedProjectState = newIndex;
+        loadProjectStateFromStore (selectedProjectState);
+        refreshProjectStateTabs();
+        markMachineDirty();
+        refreshControls();
+        startPrepareJob (false);
+    }
+
+    void setProjectStateCount (int newCount)
+    {
+        newCount = juce::jlimit (1, maxStateCount, newCount);
+        topProjectStateCountEditor.setText (juce::String (newCount), false);
+
+        if (newCount == projectStateCount)
+            return;
+
+        syncCurrentProjectStateToStore();
+        projectStateCount = newCount;
+        ensureProjectStateMachines();
+        if (selectedProjectState >= projectStateCount)
+        {
+            selectedProjectState = projectStateCount - 1;
+            loadProjectStateFromStore (selectedProjectState);
+        }
+        refreshProjectStateTabs();
+        markMachineDirty();
+        refreshControls();
+    }
+
+    struct FabricEvent
+    {
+        double waitValue = 0.0;
+        bool waitUsesBars = false;
+        int targetState = -1;
+        int randomStart = -1;
+        int randomEnd = -1;
+        double fromBar = 0.0;
+        double extraWaitValue = 0.0;
+        bool extraWaitUsesBars = false;
+    };
+
+    static juce::String stripFabricComment (juce::String line)
+    {
+        const auto comment = line.indexOf ("//");
+        if (comment >= 0)
+            line = line.substring (0, comment);
+        return line.trim();
+    }
+
+    static double parseFirstNumberAfter (const juce::String& text, const juce::String& marker, double fallback)
+    {
+        auto section = text.fromFirstOccurrenceOf (marker, false, true).trim();
+        if (section.isEmpty())
+            return fallback;
+        return section.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
+    }
+
+    std::vector<FabricEvent> parseFabricStateEvents() const
+    {
+        std::vector<FabricEvent> events;
+        const auto lines = juce::StringArray::fromLines (fabricStateProgram);
+        double pendingPlayValue = 0.0;
+        bool pendingPlayUsesBars = false;
+
+        for (auto rawLine : lines)
+        {
+            auto line = stripFabricComment (rawLine).toLowerCase();
+            if (line.startsWith ("play selected for "))
+            {
+                auto playText = line.fromFirstOccurrenceOf ("play selected for ", false, false).trim();
+                pendingPlayValue = playText.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
+                pendingPlayUsesBars = playText.contains ("bar");
+                continue;
+            }
+
+            if (! line.startsWith ("after "))
+                continue;
+
+            const auto beforeArrow = line.upToFirstOccurrenceOf ("->", false, false).trim();
+            const auto afterArrow = line.fromFirstOccurrenceOf ("->", false, false).trim();
+            if (afterArrow.isEmpty())
+                continue;
+
+            FabricEvent event;
+            auto waitText = beforeArrow.fromFirstOccurrenceOf ("after ", false, false).trim();
+            event.waitValue = waitText.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
+            event.waitUsesBars = waitText.contains ("bar");
+            if (pendingPlayValue > 0.0)
+            {
+                const auto duplicatePlayLine = pendingPlayUsesBars == event.waitUsesBars
+                                            && std::abs (pendingPlayValue - event.waitValue) < 0.001;
+                if (! duplicatePlayLine)
+                {
+                    event.extraWaitValue = pendingPlayValue;
+                    event.extraWaitUsesBars = pendingPlayUsesBars;
+                }
+                pendingPlayValue = 0.0;
+            }
+
+            if (afterArrow.startsWith ("random state "))
+            {
+                auto range = afterArrow.fromFirstOccurrenceOf ("random state ", false, false)
+                                       .upToFirstOccurrenceOf (" ", false, false)
+                                       .trim();
+                event.randomStart = juce::jlimit (0, projectStateCount - 1, range.upToFirstOccurrenceOf ("..", false, false).getIntValue() - 1);
+                event.randomEnd = juce::jlimit (0, projectStateCount - 1, range.fromFirstOccurrenceOf ("..", false, false).getIntValue() - 1);
+                if (event.randomEnd < event.randomStart)
+                    std::swap (event.randomStart, event.randomEnd);
+            }
+            else if (afterArrow.startsWith ("state "))
+            {
+                event.targetState = juce::jlimit (0, projectStateCount - 1,
+                                                  afterArrow.fromFirstOccurrenceOf ("state ", false, false)
+                                                            .upToFirstOccurrenceOf (" ", false, false).getIntValue() - 1);
+            }
+            else
+                continue;
+
+            event.fromBar = parseFirstNumberAfter (afterArrow, "from bar ", 0.0);
+            if (event.waitValue > 0.0)
+                events.push_back (event);
+        }
+
+        return events;
+    }
+
+    double secondsForFabricBars (double bars) const
+    {
+        if (machine.getStateCount() <= 0)
+            return bars;
+
+        const auto& referenceTrack = machine.state (juce::jlimit (0, machine.getStateCount() - 1, machine.selectedState));
+        return juce::jmax (0.01, bars * referenceTrack.secondsPerBar());
+    }
+
+    int initialFabricState() const
+    {
+        const auto lines = juce::StringArray::fromLines (fabricStateProgram);
+        for (auto rawLine : lines)
+        {
+            const auto line = stripFabricComment (rawLine).toLowerCase();
+            if (line.startsWith ("start state "))
+                return juce::jlimit (0, projectStateCount - 1,
+                                     line.fromFirstOccurrenceOf ("start state ", false, false)
+                                         .upToFirstOccurrenceOf (" ", false, false).getIntValue() - 1);
+        }
+
+        return 0;
+    }
+
+    double initialFabricStartBar() const
+    {
+        const auto lines = juce::StringArray::fromLines (fabricStateProgram);
+        for (auto rawLine : lines)
+        {
+            const auto line = stripFabricComment (rawLine).toLowerCase();
+            if (line.startsWith ("start state "))
+                return parseFirstNumberAfter (line, "from bar ", 0.0);
+        }
+
+        return 0.0;
+    }
+
+    void beginFabricRun()
+    {
+        fabricSchedulerEvents = parseFabricStateEvents();
+        fabricSchedulerCursor = 0;
+        ++fabricSchedulerGeneration;
+        currentFabricStartBar = initialFabricStartBar();
+
+        const auto startState = initialFabricState();
+        if (startState != selectedProjectState)
+        {
+            syncCurrentProjectStateToStore();
+            selectedProjectState = startState;
+            loadProjectStateFromStore (selectedProjectState);
+            refreshProjectStateTabs();
+        }
+    }
+
+    void switchProjectStateForFabric (int newIndex, double fromBar)
+    {
+        newIndex = juce::jlimit (0, projectStateCount - 1, newIndex);
+
+        stopTransport();
+        renderedAudioPlayer.stopAll();
+        host.pauseMachine();
+        host.stopAll (machine);
+        graph.clearTimingPulse();
+        arrangementStrip.clearTimingPulse();
+        orbitCanvas.clearReversePlayheads();
+        ++playbackGeneration;
+        renderedLaneLoopVersions.clear();
+
+        syncCurrentProjectStateToStore();
+        selectedProjectState = newIndex;
+        loadProjectStateFromStore (selectedProjectState);
+        machine.entryState = 0;
+        machine.selectedState = 0;
+        currentFabricStartBar = juce::jmax (0.0, fromBar);
+        refreshProjectStateTabs();
+        machinePrepared = false;
+        startPreparedRun();
+        startPrepareJob (false);
+    }
+
+    void scheduleNextFabricEvent (size_t eventIndex, int generation)
+    {
+        if (! fsmRunning || generation != fabricSchedulerGeneration || fabricSchedulerEvents.empty())
+            return;
+
+        if (eventIndex >= fabricSchedulerEvents.size())
+            eventIndex = 0;
+
+        const auto event = fabricSchedulerEvents[eventIndex];
+        const auto waitSeconds = (event.waitUsesBars ? secondsForFabricBars (event.waitValue) : event.waitValue)
+                               + (event.extraWaitUsesBars ? secondsForFabricBars (event.extraWaitValue) : event.extraWaitValue);
+        const auto waitMs = juce::jlimit (1, 60 * 60 * 1000, juce::roundToInt (waitSeconds * 1000.0));
+        fabricSchedulerCursor = eventIndex + 1;
+
+        juce::Timer::callAfterDelay (waitMs, [safeThis = juce::Component::SafePointer<MainComponent> (this), event, generation]
+        {
+            if (safeThis == nullptr || ! safeThis->fsmRunning || generation != safeThis->fabricSchedulerGeneration)
+                return;
+
+            auto target = event.targetState;
+            if (event.randomStart >= 0 && event.randomEnd >= event.randomStart)
+                target = event.randomStart + juce::Random::getSystemRandom().nextInt (event.randomEnd - event.randomStart + 1);
+
+            if (target >= 0)
+            {
+                safeThis->appendLog ("Fabric state -> State " + juce::String (target + 1));
+                safeThis->switchProjectStateForFabric (target, event.fromBar);
+            }
+        });
+    }
+
+    void markFabricDirty()
+    {
+        recordUndoSnapshotAfterMutation (UndoGroup::text);
+        dirtyProject = true;
+        lastDirtyMs = juce::Time::getMillisecondCounterHiRes();
+        saveProjectButton.setButtonText ("Save*");
+        updateProjectFileLabel();
+        statusLabel.setText ("Fabric edited", juce::dontSendNotification);
     }
 
     juce::String getSclangPathOverride() const
@@ -10498,6 +11316,86 @@ private:
                 return &lane;
 
         return nullptr;
+    }
+
+    bool renderedAudioFileHasSignal (const juce::String& frozenPath) const
+    {
+        auto file = juce::File (frozenPath);
+        if (! file.existsAsFile())
+            return false;
+
+        juce::AudioFormatManager manager;
+        manager.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (manager.createReaderFor (file));
+        if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+            return false;
+
+        juce::AudioBuffer<float> buffer (static_cast<int> (juce::jmin<juce::int64> (reader->numChannels, 2)),
+                                         4096);
+        juce::int64 position = 0;
+        auto peak = 0.0f;
+
+        while (position < reader->lengthInSamples && peak < 0.0005f)
+        {
+            const auto block = static_cast<int> (juce::jmin<juce::int64> (buffer.getNumSamples(), reader->lengthInSamples - position));
+            buffer.clear();
+            reader->read (&buffer, 0, block, position, true, true);
+
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                peak = juce::jmax (peak, buffer.getMagnitude (channel, 0, block));
+
+            position += block;
+        }
+
+        return peak >= 0.0005f;
+    }
+
+    bool markFrozenLaneRenderFailedById (MachineModel& model, const juce::String& laneId, const juce::String& frozenPath)
+    {
+        auto updated = false;
+        for (int stateIndex = 0; stateIndex < model.getStateCount(); ++stateIndex)
+        {
+            auto& state = model.state (stateIndex);
+            if (auto* lane = findLaneByIdInState (state, laneId))
+            {
+                lane->frozen = true;
+                lane->freezeStale = true;
+                lane->freezeInProgress = false;
+                lane->frozenAudioPath = frozenPath;
+                lane->preparedBridge = -1;
+                updated = true;
+            }
+
+            if (auto* child = model.childMachine (stateIndex))
+                updated = markFrozenLaneRenderFailedById (*child, laneId, frozenPath) || updated;
+        }
+
+        return updated;
+    }
+
+    bool updateFrozenLaneById (MachineModel& model, const juce::String& laneId, const juce::String& frozenPath)
+    {
+        auto updated = false;
+        for (int stateIndex = 0; stateIndex < model.getStateCount(); ++stateIndex)
+        {
+            auto& state = model.state (stateIndex);
+            if (auto* lane = findLaneByIdInState (state, laneId))
+            {
+                lane->frozen = true;
+                lane->freezeStale = false;
+                lane->freezeInProgress = false;
+                lane->frozenAudioPath = frozenPath;
+                if (lane->frozenDurationSeconds <= 0.0)
+                    lane->frozenDurationSeconds = laneRenderDurationSeconds (state, *lane) / juce::jmax (0.05, rateSlider.getValue());
+                lane->preparedBridge = -1;
+                updated = true;
+            }
+
+            if (auto* child = model.childMachine (stateIndex))
+                updated = updateFrozenLaneById (*child, laneId, frozenPath) || updated;
+        }
+
+        return updated;
     }
 
     void promptOrbitConnectionAction (int sourceState, int sourceLane, float sourcePhase, int targetState)
@@ -10555,8 +11453,8 @@ private:
         machine.orbitConnections.push_back (std::move (connection));
         previousOrbitConnectionPhases.assign (machine.orbitConnections.size(), 0.0f);
         statusLabel.setText ("Connection: "
-                             + machine.state (sourceState).name + " -> "
-                             + machine.state (targetState).name + " / "
+                             + trackDisplayName (machine.state (sourceState)) + " -> "
+                             + trackDisplayName (machine.state (targetState)) + " / "
                              + orbitConnectionActionLabel (action),
                              juce::dontSendNotification);
         markMachineDirty();
@@ -10671,6 +11569,10 @@ private:
 
         machineStack.clear();
         activeMachine = &machine;
+        inspectedMachine = &machine;
+        trackList.clearState();
+        mixer.clearState();
+        navigator.clearMachines();
         machine.setStateCount (newCount);
         graph.setMachine (machine);
         graph.setInspectedMachine (&machine);
@@ -10757,6 +11659,7 @@ private:
         arrangementStrip.clearTimingPulse();
         orbitCanvas.resetTransportStart();
         orbitCanvas.clearReversePlayheads();
+        applyFabricVisualStartOffset();
         orbitConnectionTransportStartMs = juce::Time::getMillisecondCounterHiRes();
         previousOrbitConnectionPhases.assign (machine.orbitConnections.size(), 0.0f);
         host.configureMachine (machine);
@@ -10765,7 +11668,8 @@ private:
         setVisualStateImmediate (0, false);
         ++playbackGeneration;
         renderedLaneLoopVersions.clear();
-        scheduleAllTracksFromBarZero (playbackGeneration);
+        scheduleAllTracksFromBar (playbackGeneration, currentFabricStartBar);
+        scheduleNextFabricEvent (fabricSchedulerCursor, fabricSchedulerGeneration);
         refreshControls();
     }
 
@@ -10780,7 +11684,7 @@ private:
 
         prepareQueued = false;
         prepareQueuedStartAfter = false;
-        runButton.setButtonText ("Run");
+        runButton.setButtonText (fsmRunning ? "Pause" : "Run");
         statusLabel.setText ("Booting audio", juce::dontSendNotification);
 
         auto lanes = makeLaneSnapshots();
@@ -10844,26 +11748,41 @@ private:
 
                 if (preparedBridge >= 0)
                 {
+                    const auto queuedStartAfterCurrentPrepare = safeThis->prepareQueuedStartAfter && safeThis->fsmRunning;
+                    if (queuedStartAfterCurrentPrepare)
+                    {
+                        safeThis->prepareQueued = false;
+                        safeThis->prepareQueuedStartAfter = false;
+                    }
+
                     safeThis->markPreparedLanes (lanes, preparedBridge);
                     safeThis->host.configureMachine (safeThis->machine);
                     safeThis->applyAllMixToHost();
                     safeThis->machinePrepared = true;
 
-                    if (startAfterPrepare && safeThis->fsmRunning)
+                    if ((startAfterPrepare || queuedStartAfterCurrentPrepare) && safeThis->fsmRunning)
                     {
                         safeThis->startPreparedRun();
                     }
                     else
                     {
-                        safeThis->runButton.setButtonText ("Run");
+                        safeThis->runButton.setButtonText (safeThis->fsmRunning ? "Pause" : "Run");
                     }
 
                     launchQueuedPrepare();
                 }
                 else
                 {
-                    safeThis->fsmRunning = false;
-                    safeThis->runButton.setButtonText ("Run");
+                    if (startAfterPrepare)
+                    {
+                        safeThis->fsmRunning = false;
+                        safeThis->runButton.setButtonText ("Run");
+                    }
+                    else
+                    {
+                        safeThis->runButton.setButtonText (safeThis->fsmRunning ? "Pause" : "Run");
+                    }
+
                     launchQueuedPrepare();
                 }
 
@@ -11411,13 +12330,13 @@ private:
             }
 
             case OrbitConnectionAction::programmable:
-                appendLog ("Fabric connection fired for " + machine.state (connection.targetState).name
+                appendLog ("Fabric connection fired for " + trackDisplayName (machine.state (connection.targetState))
                            + ": " + connection.fabricScript);
                 break;
         }
 
         statusLabel.setText ("Connection fired: " + orbitConnectionActionLabel (connection.action)
-                             + " " + machine.state (connection.targetState).name,
+                             + " " + trackDisplayName (machine.state (connection.targetState)),
                              juce::dontSendNotification);
     }
 
@@ -11619,7 +12538,21 @@ private:
         pauseOrbitConnectionTarget (stateIndex);
     }
 
-    void scheduleAllTracksFromBarZero (int generation)
+    void applyFabricVisualStartOffset()
+    {
+        if (currentFabricStartBar <= 0.0)
+            return;
+
+        for (int stateIndex = 0; stateIndex < machine.getStateCount(); ++stateIndex)
+        {
+            const auto& state = machine.state (stateIndex);
+            const auto bars = juce::jmax (1, state.arrangementBars);
+            const auto phase = static_cast<float> (std::fmod (currentFabricStartBar, static_cast<double> (bars)) / static_cast<double> (bars));
+            orbitCanvas.setForwardPlayheadFromPhase (stateIndex, phase);
+        }
+    }
+
+    void scheduleAllTracksFromBar (int generation, double startBar)
     {
         host.stopAll (machine);
         renderedAudioPlayer.start();
@@ -11628,6 +12561,8 @@ private:
         for (auto& state : machine.states)
         {
             const auto trackMs = state.secondsPerSection() * 1000.0 / rate;
+            const auto startOffsetSeconds = std::fmod (juce::jmax (0.0, startBar) * state.secondsPerBar() / rate,
+                                                       juce::jmax (0.001, trackMs / 1000.0));
             const auto hasPlacedAudio = std::any_of (state.lanes.begin(), state.lanes.end(), [] (const Lane& lane)
             {
                 return lane.sourceScriptPath.isNotEmpty() || lane.frozenAudioPath.isNotEmpty();
@@ -11638,14 +12573,25 @@ private:
                 if (! shouldRunPlacedLaneOnOrbit (state, lane, hasPlacedAudio))
                     continue;
 
-                const auto delaySeconds = juce::jlimit (0.0, trackMs, trackMs * static_cast<double> (lane.orbitPhase)) / 1000.0;
+                const auto laneStartSeconds = (trackMs * static_cast<double> (lane.orbitPhase)) / 1000.0;
+                const auto laneDurationSeconds = laneRenderDurationSeconds (state, lane) / rate;
+                auto delaySeconds = laneStartSeconds - startOffsetSeconds;
+                while (delaySeconds < 0.0)
+                    delaySeconds += trackMs / 1000.0;
+                double sourceOffsetSeconds = 0.0;
+                if (startOffsetSeconds >= laneStartSeconds
+                    && startOffsetSeconds < laneStartSeconds + laneDurationSeconds)
+                {
+                    delaySeconds = 0.0;
+                    sourceOffsetSeconds = startOffsetSeconds - laneStartSeconds;
+                }
                 const auto delayMs = juce::roundToInt (delaySeconds * 1000.0);
                 const auto laneId = lane.id;
                 const auto isRenderedLane = lane.frozen && ! lane.freezeStale && lane.frozenAudioPath.isNotEmpty();
 
                 if (isRenderedLane)
                 {
-                    scheduleRenderedLaneOrbitLoop (state.index, lane.id, delaySeconds, generation);
+                    scheduleRenderedLaneOrbitLoop (state.index, lane.id, delaySeconds, generation, false, sourceOffsetSeconds);
                     continue;
                 }
 
@@ -11707,7 +12653,7 @@ private:
         {
             lane->playing = true;
             appendLog ("JUCE scheduled rendered lane: " + lane->id + " @ "
-                       + machine.state (stateIndex).name + " -> " + lane->frozenAudioPath);
+                       + trackDisplayName (machine.state (stateIndex)) + " -> " + lane->frozenAudioPath);
         }
         else
         {
@@ -12108,12 +13054,83 @@ private:
         return count;
     }
 
-    void renderAllPlacedLanes()
+    int countRenderablePlacedLanesInMachine (const MachineModel& model) const
     {
-        const auto count = renderAllPlacedLanesInMachine (machine);
-        if (count > 0)
+        auto count = 0;
+        for (const auto& state : model.states)
         {
-            statusLabel.setText ("Rendering " + juce::String (count) + " lane" + (count == 1 ? "" : "s"), juce::dontSendNotification);
+            for (const auto& lane : state.lanes)
+            {
+                const auto hasSource = lane.sourceScriptPath.isNotEmpty() || lane.script.trim().isNotEmpty();
+                if (hasSource && ! lane.freezeInProgress)
+                    ++count;
+            }
+
+            if (auto* child = model.childMachine (state.index))
+                count += countRenderablePlacedLanesInMachine (*child);
+        }
+
+        return count;
+    }
+
+    MachineModel* projectMachineForRenderState (int stateIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= projectStateCount)
+            return nullptr;
+
+        if (stateIndex == selectedProjectState)
+            return &machine;
+
+        ensureProjectStateMachines();
+        return projectStateMachines[static_cast<size_t> (stateIndex)].get();
+    }
+
+    void continueQueuedRenderAllIfReady()
+    {
+        if (! renderAllInProgress || renderAllCurrentProjectState < 0)
+            return;
+
+        if (auto* current = projectMachineForRenderState (renderAllCurrentProjectState))
+            if (countFreezingLanes (*current) > 0)
+                return;
+
+        renderNextQueuedProjectState();
+    }
+
+    void renderNextQueuedProjectState()
+    {
+        while (renderAllQueueIndex < renderAllProjectStateQueue.size())
+        {
+            const auto projectStateIndex = renderAllProjectStateQueue[renderAllQueueIndex++];
+            auto* model = projectMachineForRenderState (projectStateIndex);
+            if (model == nullptr)
+                continue;
+
+            renderAllCurrentProjectState = projectStateIndex;
+            const auto count = renderAllPlacedLanesInMachine (*model);
+            if (count <= 0)
+                continue;
+
+            renderAllRenderedLaneCount += count;
+            statusLabel.setText ("Rendering State " + juce::String (projectStateIndex + 1)
+                                 + " (" + juce::String (count) + " lane" + (count == 1 ? "" : "s") + ")",
+                                 juce::dontSendNotification);
+            orbitCanvas.invalidateWaveforms();
+            refreshControls();
+            return;
+        }
+
+        renderAllInProgress = false;
+        renderAllCurrentProjectState = -1;
+        renderAllProjectStateQueue.clear();
+        renderAllQueueIndex = 0;
+
+        if (renderAllRenderedLaneCount > 0)
+        {
+            statusLabel.setText ("Rendered " + juce::String (renderAllRenderedLaneCount) + " lane"
+                                 + (renderAllRenderedLaneCount == 1 ? "" : "s") + " across "
+                                 + juce::String (projectStateCount) + " state" + (projectStateCount == 1 ? "" : "s"),
+                                 juce::dontSendNotification);
             markMachineDirty();
             refreshProjectMediaStatus();
         }
@@ -12122,7 +13139,44 @@ private:
             statusLabel.setText ("No lanes to render", juce::dontSendNotification);
         }
 
+        renderAllRenderedLaneCount = 0;
         refreshControls();
+    }
+
+    void renderAllPlacedLanes()
+    {
+        if (renderAllInProgress)
+        {
+            statusLabel.setText ("Render all already running", juce::dontSendNotification);
+            return;
+        }
+
+        ensureProjectStateMachines();
+        renderAllProjectStateQueue.clear();
+        renderAllQueueIndex = 0;
+        renderAllCurrentProjectState = -1;
+        renderAllRenderedLaneCount = 0;
+
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (auto* model = projectMachineForRenderState (stateIndex))
+                if (countRenderablePlacedLanesInMachine (*model) > 0)
+                    renderAllProjectStateQueue.push_back (stateIndex);
+        }
+
+        if (! renderAllProjectStateQueue.empty())
+        {
+            renderAllInProgress = true;
+            statusLabel.setText ("Rendering queued across " + juce::String (renderAllProjectStateQueue.size())
+                                 + " state" + (renderAllProjectStateQueue.size() == 1 ? "" : "s"),
+                                 juce::dontSendNotification);
+            renderNextQueuedProjectState();
+        }
+        else
+        {
+            statusLabel.setText ("No lanes to render", juce::dontSendNotification);
+            refreshControls();
+        }
     }
 
     int countStaleFrozenLanes (const MachineModel& model) const
@@ -12152,6 +13206,38 @@ private:
 
             if (auto* child = model.childMachine (state.index))
                 count += countFreezingLanes (*child);
+        }
+
+        return count;
+    }
+
+    int countFreezingLanesInProject()
+    {
+        ensureProjectStateMachines();
+        auto count = countFreezingLanes (machine);
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+                continue;
+
+            if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+                count += countFreezingLanes (*projectStateMachines[static_cast<size_t> (stateIndex)]);
+        }
+
+        return count;
+    }
+
+    int countStaleFrozenLanesInProject()
+    {
+        ensureProjectStateMachines();
+        auto count = countStaleFrozenLanes (machine);
+        for (int stateIndex = 0; stateIndex < projectStateCount; ++stateIndex)
+        {
+            if (stateIndex == selectedProjectState)
+                continue;
+
+            if (projectStateMachines[static_cast<size_t> (stateIndex)] != nullptr)
+                count += countStaleFrozenLanes (*projectStateMachines[static_cast<size_t> (stateIndex)]);
         }
 
         return count;
@@ -12253,7 +13339,7 @@ private:
     void promptSuperColliderLaneDuration (int stateIndex, float phase, const juce::File& file)
     {
         laneDurationPrompt = std::make_unique<juce::AlertWindow> ("Render duration",
-                                                                  "Choose how long this SuperCollider file should play on the track.",
+                                                                  "Choose how long this SuperCollider file should play on the lane.",
                                                                   juce::AlertWindow::NoIcon);
         laneDurationPrompt->addTextEditor ("amount", "1", "Bars or seconds");
         laneDurationPrompt->addButton ("Beat", 1);
@@ -12354,7 +13440,7 @@ private:
         const auto& selectedLane = currentInspectorMachine().selectedLaneRef();
         const auto mediaStatus = cachedProjectMediaStatus;
         const auto mediaSummary = mediaStatusSummary (mediaStatus);
-        const auto freezingCount = countFreezingLanes (machine);
+        const auto freezingCount = countFreezingLanesInProject();
         const auto freezeSuffix = freezingCount > 0 ? " | " + juce::String (freezingCount) + " freezing" : juce::String();
         if (selectedLane.freezeInProgress)
         {
@@ -12382,8 +13468,8 @@ private:
             refreezeLaneButton.setButtonText ("Refreeze");
         }
         refreezeLaneButton.setEnabled (! selectedLane.freezeInProgress);
-        refreezeStaleButton.setEnabled ((mediaStatus.stale > 0 || mediaStatus.missing > 0) && freezingCount == 0);
-        renderAllButton.setEnabled (freezingCount == 0);
+        refreezeStaleButton.setEnabled ((mediaStatus.stale > 0 || mediaStatus.missing > 0 || countStaleFrozenLanesInProject() > 0) && freezingCount == 0);
+        renderAllButton.setEnabled (! renderAllInProgress && freezingCount == 0);
         breadcrumbLabel.setText (makeBreadcrumb(), juce::dontSendNotification);
         stateSummaryLabel.setText (makeStateSummary(), juce::dontSendNotification);
         const auto& inspectedState = currentInspectorMachine().state (currentInspectorMachine().selectedState);
@@ -12415,6 +13501,7 @@ private:
             nestedModeBox.setSelectedItemIndex (0, juce::dontSendNotification);
             nestedDivisionEditor.setText ("-", false);
         }
+        topProjectStateCountEditor.setText (juce::String (projectStateCount), false);
         topStateCountEditor.setText (juce::String (machine.getStateCount()), false);
         const auto arrangementVisible = arrangementViewMode > 0;
         arrangementStrip.setVisible (arrangementVisible);
@@ -12445,6 +13532,12 @@ private:
                                                                           : rowFill().interpolatedWith (graphColour (machine.selectedState), 0.10f));
         renderAllButton.setColour (juce::TextButton::buttonColourId, rowFill().interpolatedWith (accentB(), 0.14f));
         renderAllButton.setColour (juce::TextButton::textColourOffId, accentB().brighter (0.06f));
+        exportAudioButton.setButtonText (exportInProgress ? "Cancel" : "Export");
+        exportAudioButton.setEnabled (! exportCancelRequested);
+        exportAudioButton.setColour (juce::TextButton::buttonColourId, exportInProgress ? rowFill().interpolatedWith (accentC(), 0.28f)
+                                                                                        : rowFill().interpolatedWith (accentA(), 0.16f));
+        exportAudioButton.setColour (juce::TextButton::textColourOffId, exportInProgress ? accentC().brighter (0.10f)
+                                                                                         : accentA().brighter (0.04f));
         shapeEditButton.setToggleState (orbitShapeEditMode, juce::dontSendNotification);
         shapeEditButton.setColour (juce::TextButton::buttonColourId, orbitShapeEditMode ? rowFill().interpolatedWith (accentB(), 0.22f)
                                                                                         : rowFill().interpolatedWith (accentB(), 0.08f));
@@ -12462,6 +13555,7 @@ private:
         orbitCanvas.repaint();
         rules.repaint();
         graph.setInspectedMachine (&currentInspectorMachine());
+        refreshProjectStateTabs();
         updateTransitionPreview();
     }
 
@@ -12482,7 +13576,7 @@ private:
     {
         juce::StringArray names;
         for (int i = 0; i < currentMachine().getStateCount(); ++i)
-            names.add (currentMachine().state (i).name);
+            names.add (trackDisplayName (currentMachine().state (i)));
 
         stateTabs.setItems (names, currentMachine().selectedState);
     }
@@ -12514,6 +13608,7 @@ private:
 
     OfLookAndFeel ofLookAndFeel;
     MachineModel machine;
+    std::vector<std::unique_ptr<MachineModel>> projectStateMachines;
     MachineModel* activeMachine = &machine;
     MachineModel* inspectedMachine = &machine;
     std::vector<MachineModel*> machineStack;
@@ -12538,6 +13633,10 @@ private:
     juce::TextButton redoButton;
     juce::TextButton logButton;
     juce::TextButton panicButton;
+    juce::Label topProjectStateCountLabel;
+    juce::TextButton topProjectStateCountMinus;
+    juce::TextEditor topProjectStateCountEditor;
+    juce::TextButton topProjectStateCountPlus;
     juce::Label topStateCountLabel;
     juce::TextButton topStateCountMinus;
     juce::TextEditor topStateCountEditor;
@@ -12548,7 +13647,11 @@ private:
     juce::TextButton stepButton;
     juce::TextButton stopAllButton;
     juce::TextButton renderAllButton;
+    juce::TextButton exportAudioButton;
     juce::Slider rateSlider;
+    juce::Label fabricScriptLabel;
+    juce::TextEditor fabricScriptEditor;
+    PillBar projectStateTabs;
     PillBar stateTabs;
     ArrangementStripComponent arrangementStrip;
     FsmNavigatorComponent navigator;
@@ -12611,18 +13714,32 @@ private:
     bool codeExpanded = false;
     int headerCompactLevel = 0;
     int arrangementViewMode = 0;
+    int projectStateCount = maxStateCount;
+    int selectedProjectState = 0;
+    juce::String fabricStateProgram;
+    bool updatingFabricScriptEditor = false;
     bool orbitShapeEditMode = false;
     int orbitFocusedTrack = -1;
     int selectedRenderedWaveformState = -1;
     int selectedRenderedWaveformLane = -1;
     bool fsmRunning = false;
     int playbackGeneration = 0;
+    std::vector<FabricEvent> fabricSchedulerEvents;
+    size_t fabricSchedulerCursor = 0;
+    int fabricSchedulerGeneration = 0;
+    double currentFabricStartBar = 0.0;
     std::unordered_map<std::string, int> renderedLaneLoopVersions;
+    std::vector<int> renderAllProjectStateQueue;
+    size_t renderAllQueueIndex = 0;
+    int renderAllCurrentProjectState = -1;
+    int renderAllRenderedLaneCount = 0;
+    bool renderAllInProgress = false;
     double orbitConnectionTransportStartMs = 0.0;
     std::vector<float> previousOrbitConnectionPhases;
     bool machinePrepared = false;
     bool exportInProgress = false;
     bool exportCancelRequested = false;
+    std::shared_ptr<std::atomic<bool>> activeExportCancelFlag;
     double exportElapsedSeconds = 0.0;
     double exportTotalSeconds = 0.0;
     juce::String exportOutputPath;

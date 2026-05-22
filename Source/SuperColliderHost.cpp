@@ -543,7 +543,7 @@ void SuperColliderHost::transition(const std::vector<Lane*>& lanesToStop,
                 lane->playing = true;
 
         sendTransitionCommand (stopIds, playIds, releaseSeconds, delaySeconds);
-        setStatus (playIds.isEmpty() ? "Audio ready" : "Playing state");
+        setStatus (playIds.isEmpty() ? "Audio ready" : "Playing track");
     }
 
 void SuperColliderHost::stopAll(MachineModel& model)
@@ -580,7 +580,7 @@ void SuperColliderHost::resetProjectState (const juce::String& sclangPath)
         juce::Thread::sleep (35);
         tempScripts.clear();
         tempScriptStorage.clear();
-        addLog ("Audio project state reset");
+        addLog ("Audio project reset");
         setStatus ("Audio ready");
     }
 
@@ -643,7 +643,7 @@ void SuperColliderHost::configureMachine(const MachineModel& model)
         }
 
         writeCommand ("~ofConfigureMachine.(" + machineAsSuperColliderEvent (model) + ");\n");
-        addLog ("FSM prepared");
+        addLog ("Tracks prepared");
     }
 
 void SuperColliderHost::runMachine(int startState, double rateHz)
@@ -1118,10 +1118,10 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "            ~ofStop.(key, 0.02);\n"
                "            recBuf = Buffer.alloc(s, (s.sampleRate * duration).asInteger.max(1024), 2);\n"
                "            s.sync;\n"
-               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, if (~ofProgramUsesLaneBus[key] == true, { ~ofLaneBusFor.(key) }, { 0 })]);\n"
-               "            s.sync;\n"
                "            obj = program.value;\n"
                "            ~ofObjects[key] = obj;\n"
+               "            recSynth = { |buf, bus| RecordBuf.ar(In.ar(bus, 2), buf, loop: 0, doneAction: 2); Silent.ar(2) }.play(s, addAction: \\addToTail, args: [\\buf, recBuf, \\bus, if (~ofProgramUsesLaneBus[key] == true, { ~ofLaneBusFor.(key) }, { 0 })]);\n"
+               "            s.sync;\n"
                "            duration.wait;\n"
                "            ~ofStop.(key, 0.05);\n"
                "            s.sync;\n"
@@ -1361,7 +1361,7 @@ juce::String SuperColliderHost::makeBridgeScript() const
                "~ofConfigureMachine = { |machine|\n"
                "    ~ofPauseMachine.();\n"
                "    ~ofConfiguredMachine = machine;\n"
-               "    (\"OF_MACHINE_CONFIGURED states=\" ++ machine[\\states].size).postln;\n"
+               "    (\"OF_MACHINE_CONFIGURED tracks=\" ++ machine[\\states].size).postln;\n"
                "};\n"
                "~ofRunMachine = { |startState = 0, rate = 1|\n"
                "    if (~ofConfiguredMachine.isNil) { \"OF_MACHINE_MISSING\".warn; ^nil };\n"
@@ -1596,7 +1596,8 @@ void SuperColliderHost::sendClearMachineCommand()
 
 bool SuperColliderHost::shouldUseCommandFallback() const
     {
-        return ! oscConnected || juce::Time::currentTimeMillis() - bridgeStartedAtMs < 1800;
+        juce::ignoreUnused (oscConnected, bridgeStartedAtMs);
+        return true;
     }
 
 bool SuperColliderHost::shouldSendOscCommand() const

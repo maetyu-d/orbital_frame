@@ -191,7 +191,7 @@ public:
         for (int i = oldSize; i < newCount; ++i)
         {
             states[static_cast<size_t> (i)].index = i;
-            states[static_cast<size_t> (i)].name = "State " + juce::String (i + 1);
+            states[static_cast<size_t> (i)].name = "Track " + juce::String (i + 1);
             states[static_cast<size_t> (i)].lanes.push_back (
                 { makeLaneId (i, 0), "Lane 1", OfDemo::defaultScriptFor (i, 0) });
         }
@@ -398,7 +398,7 @@ public:
         nodeOffsets.resize (states.size());
 
         auto& s = state (0);
-        s.name = "State 1";
+        s.name = "Track 1";
         s.tempoBpm = 120.0;
         s.beatsPerBar = 4;
         s.beatUnit = 4;
@@ -522,7 +522,7 @@ public:
     void setStateDemo (int stateIndex, std::initializer_list<std::pair<const char*, const char*>> laneDefs)
     {
         auto& s = state (stateIndex);
-        s.name = s.name.isEmpty() ? "State " + juce::String (stateIndex + 1) : s.name;
+        s.name = s.name.isEmpty() ? "Track " + juce::String (stateIndex + 1) : s.name;
         s.lanes.clear();
         int laneIndex = 0;
         for (const auto& lane : laneDefs)
